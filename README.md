@@ -45,4 +45,6 @@ Then remove the `"jira"` entry from your MCP config if you'd like (`~/.kiro/sett
 
 ## License
 
-MIT
+Copyright © 2026 MerchantE, Inc. All rights reserved.
+
+This software is proprietary and confidential. Unauthorized copying, distribution, or use of this software, via any medium, is strictly prohibited.
