@@ -24,6 +24,9 @@ INSTANCE_URL="${INSTANCE_URL%/}"
 read -p "Atlassian email address: " EMAIL
 read -sp "Atlassian API token: " API_TOKEN
 echo ""  # newline after hidden input
+if [ -n "$API_TOKEN" ]; then
+  echo "   Token received (${#API_TOKEN} characters)"
+fi
 
 if [ -z "$INSTANCE_URL" ] || [ -z "$EMAIL" ] || [ -z "$API_TOKEN" ]; then
   echo "❌ All three fields are required. Aborting."
@@ -53,10 +56,36 @@ fi
 echo ""
 echo "🐍 Setting up Python virtual environment..."
 
+# Find a Python >= 3.10
+PYTHON_BIN=""
+for candidate in python3.13 python3.12 python3.11 python3.10; do
+  if command -v "$candidate" &>/dev/null; then
+    PYTHON_BIN="$candidate"
+    break
+  fi
+done
+
+if [ -z "$PYTHON_BIN" ]; then
+  # Fall back to python3 and check version
+  if command -v python3 &>/dev/null; then
+    PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.minor}')")
+    if [ "$PY_VER" -ge 10 ] 2>/dev/null; then
+      PYTHON_BIN="python3"
+    fi
+  fi
+fi
+
+if [ -z "$PYTHON_BIN" ]; then
+  echo "   ❌ Python 3.10+ is required but not found. Please install Python 3.10 or later."
+  exit 1
+fi
+
+echo "   Using $($PYTHON_BIN --version)"
+
 if [ -d "$VENV_DIR" ]; then
   echo "   Existing venv found — reusing it."
 else
-  python3 -m venv "$VENV_DIR"
+  "$PYTHON_BIN" -m venv "$VENV_DIR"
   echo "   Created venv at $VENV_DIR"
 fi
 
@@ -80,7 +109,7 @@ echo "   Credentials saved to $ENV_FILE"
 echo ""
 echo "🔍 Validating credentials..."
 
-AUTH_HEADER=$(echo -n "$EMAIL:$API_TOKEN" | base64)
+AUTH_HEADER=$(printf '%s' "$EMAIL:$API_TOKEN" | base64 | tr -d '\n')
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
   -H "Authorization: Basic $AUTH_HEADER" \
   -H "Accept: application/json" \
@@ -116,7 +145,7 @@ with open(config_path, 'r') as f:
 if 'mcpServers' not in config:
     config['mcpServers'] = {}
 
-config['mcpServers']['jira'] = {
+config['mcpServers']['me-atlassian'] = {
     'command': '$PYTHON_PATH',
     'args': ['$SERVER_PATH'],
     'disabled': False,
@@ -134,7 +163,7 @@ import json
 
 config = {
     'mcpServers': {
-        'jira': {
+        'me-atlassian': {
             'command': '$PYTHON_PATH',
             'args': ['$SERVER_PATH'],
             'disabled': False,

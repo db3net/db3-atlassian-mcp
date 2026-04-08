@@ -211,17 +211,17 @@ def get_ticket(issue_key: str) -> str:
 @mcp.tool()
 def search_tickets(jql: str, max_results: int = 10) -> str:
     """Search Jira tickets using JQL. Example: 'project = INFOSEC AND status = Open'"""
-    resp = _api(f"/search/jql?jql={quote(jql)}&maxResults={max_results}")
+    resp = _api(f"/search/jql?jql={quote(jql)}&maxResults={max_results}&fields=summary,status,assignee")
     if "error" in resp:
         return json.dumps(resp)
     issues = []
     for issue in resp.get("issues", []):
-        f = issue.get("fields", {})
+        f = issue.get("fields") or {}
         assignee = f.get("assignee")
         issues.append({
-            "key": issue.get("key"),
+            "key": issue.get("key") or issue.get("id"),
             "summary": f.get("summary"),
-            "status": f.get("status", {}).get("name"),
+            "status": (f.get("status") or {}).get("name"),
             "assignee": assignee.get("displayName") if assignee else None,
         })
     return json.dumps(issues, indent=2)
