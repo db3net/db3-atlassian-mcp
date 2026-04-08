@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "jira": {
+      "command": "/Users/dblack/.atlassian-mcp/bin/python3",
+      "args": ["server.py"],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
