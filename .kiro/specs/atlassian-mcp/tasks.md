@@ -113,8 +113,8 @@ Extend `server.py` with helper functions, five Confluence tools, and two Jira wr
 - [x] 6. Checkpoint - Verify all tools
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 7. Create install.sh setup script
-  - [-] 7.1 Implement `install.sh` at repository root
+- [x] 7. Create install.sh setup script
+  - [x] 7.1 Implement `install.sh` at repository root
     - Prompt for Atlassian instance URL, email, API token
     - Create `~/.atlassian-mcp/` directory, clone/pull repo
     - Create/reuse Python venv, install dependencies
@@ -125,7 +125,7 @@ Extend `server.py` with helper functions, five Confluence tools, and two Jira wr
     - Script must be idempotent
     - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9_
 
-- [~] 8. Final checkpoint - Ensure all tests pass
+- [x] 8. Final checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes
