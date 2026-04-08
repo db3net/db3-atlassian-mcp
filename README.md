@@ -5,7 +5,7 @@ Connect your IDE to Jira and Confluence. Read, create, and update tickets and wi
 ## Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/MerchantE/atlassian-mcp/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/omise-us-secops/atlassian-mcp/main/install.sh | bash
 ```
 
 You'll be prompted for:

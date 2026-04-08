@@ -4,7 +4,7 @@ set -e
 INSTALL_DIR="$HOME/.atlassian-mcp"
 VENV_DIR="$INSTALL_DIR/venv"
 ENV_FILE="$INSTALL_DIR/.env"
-REPO_URL="https://github.com/MerchantE/atlassian-mcp.git"
+REPO_URL="https://github.com/omise-us-secops/atlassian-mcp.git"
 MCP_CONFIG_DIR="$HOME/.kiro/settings"
 MCP_CONFIG_FILE="$MCP_CONFIG_DIR/mcp.json"
 
