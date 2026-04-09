@@ -14,6 +14,10 @@
         "create_ticket",
         "update_ticket",
         "create_confluence_page",
+        "update_confluence_page",
+        "get_ticket",
+        "search_tickets",
+        "update_confluence_page",
         "update_confluence_page"
       ]
     }

@@ -5,7 +5,9 @@ Connect your IDE to Jira and Confluence. Read, create, and update tickets and wi
 ## Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/omise-us-secops/atlassian-mcp/main/install.sh | bash
+git clone https://github.com/omise-us-secops/atlassian-mcp.git
+cd atlassian-mcp
+bash install.sh
 ```
 
 You'll be prompted for:
@@ -15,25 +17,29 @@ You'll be prompted for:
 
 That's it. The script sets up everything and configures your IDE automatically.
 
+Once installed, open Kiro and ask it something like "Can you check if my Atlassian MCP server is connected?" to verify everything is working.
+
 ## What You Can Do
 
 ### Jira
 - Fetch any ticket by key (e.g. `INFOSEC-2239`)
 - Search tickets with JQL
 - View sub-tasks for a parent ticket
-- Create new tickets
+- Create new tickets with optional parent for sub-task linking
 - Update tickets — change fields, transition status, add comments
+- Assign tickets by name or email (no account IDs needed)
+- Attach files to tickets
 
 ### Confluence
 - Read any page by pasting its URL or page ID
 - Search pages with CQL
 - Browse all pages in a space
-- Create new pages
-- Update existing pages
+- Create new pages (with optional parent page)
+- Update existing pages with rich formatting
 
 ## Updating
 
-Run the install command again. It will pull the latest code and update dependencies without overwriting your credentials.
+Run the installer again. It pulls the latest code and updates dependencies without overwriting your credentials.
 
 ## Uninstall
 
@@ -41,7 +47,7 @@ Run the install command again. It will pull the latest code and update dependenc
 rm -rf ~/.atlassian-mcp
 ```
 
-Then remove the `"jira"` entry from your MCP config if you'd like (`~/.kiro/settings/mcp.json`).
+Then remove the `"me-atlassian"` entry from `~/.kiro/settings/mcp.json`.
 
 ## License
 

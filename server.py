@@ -40,7 +40,10 @@ def _api(path, method="GET", data=None):
     req = Request(url, data=body, headers=headers, method=method)
     try:
         with urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode())
+            body_bytes = resp.read().decode()
+            if not body_bytes:
+                return {}
+            return json.loads(body_bytes)
     except HTTPError as e:
         error_body = e.read().decode() if e.fp else ""
         return {"error": f"HTTP {e.code}", "detail": error_body}
@@ -118,9 +121,15 @@ def _strip_html(html_string: str) -> str:
 
 
 def _text_to_storage(text: str) -> str:
-    """Convert plain text to Confluence storage format XHTML."""
+    """Convert plain text to Confluence storage format XHTML.
+
+    If the text already contains HTML tags, it is returned as-is
+    (assumed to be pre-formatted storage format).
+    """
     if not text:
         return ""
+    if "<" in text and ">" in text:
+        return text
     return "".join(f"<p>{line}</p>" for line in text.split("\n") if line)
 
 
@@ -134,6 +143,24 @@ def _text_to_adf(text: str) -> dict:
         if line
     ]
     return {"type": "doc", "version": 1, "content": paragraphs}
+
+
+def _resolve_user(query: str) -> str:
+    """Resolve a display name or email to a Jira account ID.
+
+    Accepts an account ID (returned as-is), email address, or display name.
+    Returns the accountId string, or raises ValueError if no match is found.
+    """
+    # If it looks like an account ID already (hex string), return as-is
+    if len(query) >= 20 and query.replace("-", "").isalnum() and "@" not in query and " " not in query:
+        return query
+
+    resp = _api(f"/user/search?query={quote(query)}&maxResults=5")
+    if isinstance(resp, dict) and "error" in resp:
+        raise ValueError(f"User search failed: {resp.get('detail', resp.get('error'))}")
+    if isinstance(resp, list) and resp:
+        return resp[0].get("accountId")
+    raise ValueError(f"No user found matching '{query}'")
 
 
 _CONFLUENCE_URL_RE = re.compile(
@@ -182,7 +209,10 @@ def _confluence_api(path, method="GET", data=None, api_version="v2"):
     req = Request(url, data=body, headers=headers, method=method)
     try:
         with urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode())
+            body_bytes = resp.read().decode()
+            if not body_bytes:
+                return {}
+            return json.loads(body_bytes)
     except HTTPError as e:
         error_body = e.read().decode() if e.fp else ""
         return {"error": f"HTTP {e.code}", "detail": error_body}
@@ -235,8 +265,8 @@ def get_child_issues(issue_key: str) -> str:
 
 
 @mcp.tool()
-def create_ticket(project_key: str, summary: str, issue_type: str, description: str = "", assignee: str = "", priority: str = "") -> str:
-    """Create a new Jira ticket. Requires project key, summary, and issue type name."""
+def create_ticket(project_key: str, summary: str, issue_type: str, description: str = "", assignee: str = "", priority: str = "", parent_key: str = "") -> str:
+    """Create a new Jira ticket. Requires project key, summary, and issue type name. Optionally set a parent issue key to create a sub-task."""
     for field_name, value in [("project_key", project_key), ("summary", summary), ("issue_type", issue_type)]:
         if not value:
             return json.dumps({"error": "Missing required field", "detail": f"{field_name} is required"})
@@ -246,10 +276,16 @@ def create_ticket(project_key: str, summary: str, issue_type: str, description: 
         "summary": summary,
         "issuetype": {"name": issue_type},
     }
+    if parent_key:
+        fields["parent"] = {"key": parent_key}
     if description:
         fields["description"] = _text_to_adf(description)
     if assignee:
-        fields["assignee"] = {"accountId": assignee}
+        try:
+            account_id = _resolve_user(assignee)
+            fields["assignee"] = {"accountId": account_id}
+        except ValueError as e:
+            return json.dumps({"error": "Invalid assignee", "detail": str(e)})
     if priority:
         fields["priority"] = {"name": priority}
 
@@ -271,7 +307,11 @@ def update_ticket(issue_key: str, summary: str = "", description: str = "", assi
     if description:
         fields["description"] = _text_to_adf(description)
     if assignee:
-        fields["assignee"] = {"accountId": assignee}
+        try:
+            account_id = _resolve_user(assignee)
+            fields["assignee"] = {"accountId": account_id}
+        except ValueError as e:
+            return json.dumps({"error": "Invalid assignee", "detail": str(e)})
     if priority:
         fields["priority"] = {"name": priority}
     if fields:
@@ -309,6 +349,50 @@ def update_ticket(issue_key: str, summary: str = "", description: str = "", assi
 
 
 @mcp.tool()
+def attach_file(issue_key: str, file_path: str) -> str:
+    """Attach a file to a Jira ticket. Provide the issue key and absolute file path."""
+    import mimetypes
+    from pathlib import Path as FilePath
+
+    path = FilePath(file_path).expanduser().resolve()
+    if not path.exists():
+        return json.dumps({"error": "File not found", "detail": f"{file_path} does not exist"})
+
+    filename = path.name
+    content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+
+    boundary = "----KiroMCPBoundary"
+    body_parts = []
+    body_parts.append(f"--{boundary}".encode())
+    body_parts.append(f'Content-Disposition: form-data; name="file"; filename="{filename}"'.encode())
+    body_parts.append(f"Content-Type: {content_type}".encode())
+    body_parts.append(b"")
+    body_parts.append(path.read_bytes())
+    body_parts.append(f"--{boundary}--".encode())
+    body = b"\r\n".join(body_parts)
+
+    url = f"{JIRA_BASE_URL}/rest/api/3/issue/{issue_key}/attachments"
+    headers = {
+        "Authorization": _auth_header(),
+        "X-Atlassian-Token": "no-check",
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+    }
+    req = Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urlopen(req, timeout=60) as resp:
+            body_bytes = resp.read().decode()
+            if not body_bytes:
+                return json.dumps({"status": "attached", "file": filename, "issue": issue_key})
+            result = json.loads(body_bytes)
+            if isinstance(result, list) and result:
+                return json.dumps({"status": "attached", "file": filename, "issue": issue_key, "id": result[0].get("id")})
+            return json.dumps({"status": "attached", "file": filename, "issue": issue_key})
+    except HTTPError as e:
+        error_body = e.read().decode() if e.fp else ""
+        return json.dumps({"error": f"HTTP {e.code}", "detail": error_body})
+
+
+@mcp.tool()
 def get_confluence_page(page_id: str) -> str:
     """Fetch a Confluence page by numeric ID or full URL. Returns title, space, version, and body as plain text."""
     try:
@@ -320,12 +404,14 @@ def get_confluence_page(page_id: str) -> str:
     if "error" in resp:
         return json.dumps(resp)
 
+    raw_storage = resp.get("body", {}).get("storage", {}).get("value", "")
     result = {
         "id": resp.get("id"),
         "title": resp.get("title"),
         "space_id": resp.get("spaceId"),
         "version": resp.get("version", {}).get("number"),
-        "body": _strip_html(resp.get("body", {}).get("storage", {}).get("value", "")),
+        "body": _strip_html(raw_storage),
+        "body_storage": raw_storage,
     }
     return json.dumps(result, indent=2)
 

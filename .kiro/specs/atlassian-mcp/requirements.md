@@ -5,7 +5,7 @@
 
 Author: dblack
 
-Version 1.1 | April 2026
+Version 1.2 | April 2026
 
 ---
 
@@ -40,6 +40,8 @@ The server currently supports reading Jira tickets. This project extends it to s
 - Context switching between the IDE and browser breaks flow and costs time
 - Looking up ticket details requires navigating Jira's UI, finding the right project, and locating the issue
 - Creating tickets for bugs or tasks found during development requires leaving the editor, filling out forms, and returning
+- Creating sub-tasks under an epic or parent ticket requires navigating Jira's UI to set the parent link
+- Attaching files like logs, screenshots, or design docs to tickets means downloading, navigating to the ticket, and uploading manually
 - Updating Confluence documentation means opening the wiki, finding the page, entering the editor, making changes, and publishing
 - Searching across Jira and Confluence requires separate searches in separate interfaces
 - New team members need to manually configure credentials and server settings to use the existing Jira integration
@@ -63,8 +65,9 @@ The server currently supports reading Jira tickets. This project extends it to s
 - `get_child_issues` — Get child/sub-task issues for a parent ticket
 
 ### Jira (new)
-- `create_ticket` — Create a new Jira ticket in a project
+- `create_ticket` — Create a new Jira ticket, optionally as a sub-task of a parent issue
 - `update_ticket` — Update fields, transition status, or add comments on an existing ticket
+- `attach_file` — Attach a file to a Jira ticket
 
 ### Confluence (new)
 - `get_confluence_page` — Fetch a Confluence page by ID or URL
@@ -160,8 +163,10 @@ The server currently supports reading Jira tickets. This project extends it to s
 2. WHEN the Jira_Ticket is created successfully, THE MCP_Server SHALL return the new issue key, summary, status, and issue type
 3. WHEN an optional description string is provided, THE MCP_Server SHALL include the description in the created Jira_Ticket
 4. WHEN optional fields (assignee, priority) are provided, THE MCP_Server SHALL set those fields on the created Jira_Ticket
-5. IF the project key is invalid or the user lacks create permission, THEN THE MCP_Server SHALL return a structured error object containing the HTTP error code and error detail from the Jira_API
-6. IF a required field (project key, summary, or Issue_Type) is missing, THEN THE MCP_Server SHALL return a descriptive error message identifying the missing field
+5. WHEN an optional parent issue key is provided, THE MCP_Server SHALL create the Jira_Ticket as a sub-task linked to the specified parent
+6. THE MCP_Server SHALL resolve assignee values by display name or email address, not requiring account IDs
+7. IF the project key is invalid or the user lacks create permission, THEN THE MCP_Server SHALL return a structured error object containing the HTTP error code and error detail from the Jira_API
+8. IF a required field (project key, summary, or Issue_Type) is missing, THEN THE MCP_Server SHALL return a descriptive error message identifying the missing field
 
 ### Requirement 9: Update an Existing Jira Ticket
 
@@ -189,3 +194,24 @@ The server currently supports reading Jira tickets. This project extends it to s
 5. WHEN the install script completes, it SHALL configure the user's IDE to use the MCP server automatically
 6. IF the installation directory already exists, the install script SHALL reuse it and update dependencies rather than recreating it
 7. THE install script SHALL validate that the provided credentials can authenticate against the Atlassian API and report success or failure to the user
+
+### Requirement 11: Attach Files to Jira Tickets
+
+**User Story:** As a developer, I want to attach files to Jira tickets from my IDE, so that I can share logs, screenshots, or documents without switching to the browser.
+
+#### Acceptance Criteria
+
+1. WHEN an issue key and a file path are provided, THE MCP_Server SHALL upload the file as an attachment to the specified Jira_Ticket
+2. WHEN the file is attached successfully, THE MCP_Server SHALL return a confirmation with the filename and issue key
+3. IF the file path does not exist, THEN THE MCP_Server SHALL return a descriptive error message
+4. IF the issue key does not exist or the user lacks permission, THEN THE MCP_Server SHALL return a structured error object containing the HTTP error code and error detail from the Jira_API
+
+### Requirement 12: Resolve Users by Name or Email
+
+**User Story:** As a developer, I want to assign tickets using a person's name or email address, so that I don't need to look up Atlassian account IDs.
+
+#### Acceptance Criteria
+
+1. WHEN an assignee value is provided as a display name or email address, THE MCP_Server SHALL search for the matching user and resolve it to an account ID
+2. IF no matching user is found, THEN THE MCP_Server SHALL return a descriptive error message
+3. THE MCP_Server SHALL use this resolution for both create and update ticket operations
