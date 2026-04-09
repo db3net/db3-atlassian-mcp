@@ -1,60 +1,59 @@
-# Atlassian MCP Server
+# db3-atlassian-mcp
 
-Connect your IDE to Jira and Confluence. Read, create, and update tickets and wiki pages right from your editor.
+Lightweight MCP server for Jira and Confluence — read, create, and update from your AI IDE.
 
 ## Install
 
-### Quick (via uvx)
+### Step 1: Get an API Token
 
-If you have `uv` installed:
+Go to [https://id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) and create a new token.
 
-```bash
-uvx db3-atlassian-mcp@latest
-```
-
-### From source
+### Step 2: Create your .env file
 
 ```bash
-git clone https://github.com/db3net/db3-atlassian-mcp.git
-cd db3-atlassian-mcp
-bash install.sh
-```
+mkdir -p ~/.db3-atlassian-mcp
 
-You'll be prompted for:
-- Your Atlassian instance URL (e.g. `https://yourcompany.atlassian.net`)
-- Your email address
-- An API token ([create one here](https://id.atlassian.com/manage-profile/security/api-tokens))
-
-That's it. The script sets up everything and configures your IDE automatically.
-
-Once installed, open Kiro and ask it something like "Can you check if my Atlassian MCP server is connected?" to verify everything is working.
-
-## Configuration
-
-The server reads credentials from a `.env` file. The installer creates this automatically, but you can also set it up manually.
-
-### .env file
-
-Create `~/.atlassian-mcp/.env` with:
-
-```
+cat > ~/.db3-atlassian-mcp/.env << EOF
 JIRA_BASE_URL=https://yourcompany.atlassian.net
 JIRA_USER=you@yourcompany.com
 JIRA_API_KEY=your-api-token-here
+EOF
 ```
 
-The server searches for `.env` in this order:
-1. `~/.atlassian-mcp/.env` (recommended — created by the installer)
-2. `.env` in the current working directory
+### Step 3: Add to your IDE's MCP config
 
-### MCP config (alternative)
+> **Tip:** If you skip Step 2, you can put your credentials directly in the `env` block below instead of using a `.env` file. Either approach works.
 
-You can also pass credentials via your IDE's MCP config (`~/.kiro/settings/mcp.json`):
+#### Kiro
+
+You can ask Kiro to do this for you: *"Add db3-atlassian-mcp to my MCP config using uvx with my Atlassian credentials"*
+
+Or manually open `~/.kiro/settings/mcp.json` and add inside `"mcpServers"`:
+
+```json
+"db3.atlassian-mcp": {
+  "command": "uvx",
+  "args": ["db3-atlassian-mcp@latest"],
+  "disabled": false,
+  "autoApprove": [],
+  "env": {
+    "JIRA_BASE_URL": "https://yourcompany.atlassian.net",
+    "JIRA_USER": "you@yourcompany.com",
+    "JIRA_API_KEY": "your-api-token-here"
+  }
+}
+```
+
+The `env` block is optional if you already created a `.env` file in Step 2.
+
+#### VS Code / Cursor / Windsurf
+
+Add to `.vscode/mcp.json` in your workspace (or global settings):
 
 ```json
 {
   "mcpServers": {
-    "me-atlassian": {
+    "db3.atlassian-mcp": {
       "command": "uvx",
       "args": ["db3-atlassian-mcp@latest"],
       "env": {
@@ -67,12 +66,36 @@ You can also pass credentials via your IDE's MCP config (`~/.kiro/settings/mcp.j
 }
 ```
 
-Either approach works. The `.env` file keeps credentials out of your IDE config.
+#### Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "db3.atlassian-mcp": {
+      "command": "uvx",
+      "args": ["db3-atlassian-mcp@latest"],
+      "env": {
+        "JIRA_BASE_URL": "https://yourcompany.atlassian.net",
+        "JIRA_USER": "you@yourcompany.com",
+        "JIRA_API_KEY": "your-api-token-here"
+      }
+    }
+  }
+}
+```
+
+### Step 4: Restart your IDE
+
+The MCP server will appear in your sidebar as `db3.atlassian-mcp`.
+
+Once connected, ask Kiro something like "Read Jira ticket PROJECT-123" to verify it's working.
 
 ## What You Can Do
 
 ### Jira
-- Fetch any ticket by key (e.g. `INFOSEC-2239`)
+- Fetch any ticket by key
 - Search tickets with JQL
 - View sub-tasks for a parent ticket
 - Create new tickets with optional parent for sub-task linking
@@ -87,17 +110,72 @@ Either approach works. The `.env` file keeps credentials out of your IDE config.
 - Create new pages (with optional parent page)
 - Update existing pages with rich formatting
 
+## Configuration
+
+The server reads credentials from a `.env` file. It searches in this order:
+
+1. `~/.db3-atlassian-mcp/.env` (recommended)
+2. `.env` in the current working directory
+
+You can also pass credentials via your MCP config's `env` block:
+
+```json
+"db3.atlassian-mcp": {
+  "command": "uvx",
+  "args": ["db3-atlassian-mcp@latest"],
+  "env": {
+    "JIRA_BASE_URL": "https://yourcompany.atlassian.net",
+    "JIRA_USER": "you@yourcompany.com",
+    "JIRA_API_KEY": "your-api-token-here"
+  }
+}
+```
+
+Either approach works. The `.env` file keeps credentials out of your IDE config.
+
+## Alternative: Install from Source
+
+```bash
+git clone https://github.com/db3net/db3-atlassian-mcp.git
+cd db3-atlassian-mcp
+bash install.sh
+```
+
+The installer prompts for your credentials, sets up a Python venv, validates the connection, and configures Kiro automatically.
+
 ## Updating
 
-Run the installer again. It pulls the latest code and updates dependencies without overwriting your credentials.
+If using `uvx`, it automatically pulls the latest version each time Kiro starts. If installed from source, run the installer again.
 
 ## Uninstall
 
 ```bash
-rm -rf ~/.atlassian-mcp
+rm -rf ~/.db3-atlassian-mcp
 ```
 
-Then remove the `"me-atlassian"` entry from `~/.kiro/settings/mcp.json`.
+Then remove the `"db3.atlassian-mcp"` entry from your IDE's MCP config.
+
+## Troubleshooting
+
+### Server shows "connection failed" or ENOENT
+- Make sure `uv` is installed: `pip install uv` or `brew install uv`
+- Verify `uvx` is on your PATH: `which uvx`
+- Check that Python 3.10+ is available: `python3 --version`
+
+### 401 Unauthorized
+- Verify your API token hasn't expired (Atlassian tokens can have expiration dates)
+- Check that `JIRA_USER` is your email address, not your username
+- Regenerate your token at [https://id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
+
+### .env file not found
+- Confirm the file exists: `cat ~/.db3-atlassian-mcp/.env`
+- Make sure all three variables are set: `JIRA_BASE_URL`, `JIRA_USER`, `JIRA_API_KEY`
+- The URL should not have a trailing slash
+
+### Tools not showing up
+- Restart your IDE after adding the MCP config
+- Check your IDE's MCP server logs for errors
+- In Kiro: look at the MCP Servers panel in the sidebar and click reconnect
 
 ## License
 

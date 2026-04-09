@@ -16,7 +16,7 @@ from fastmcp import FastMCP
 
 # Load .env — check common locations
 for env_path in [
-    Path.home() / ".atlassian-mcp" / ".env",
+    Path.home() / ".db3-atlassian-mcp" / ".env",
     Path(".env"),
 ]:
     if env_path.exists():

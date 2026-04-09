@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-INSTALL_DIR="$HOME/.atlassian-mcp"
+INSTALL_DIR="$HOME/.db3-atlassian-mcp"
 VENV_DIR="$INSTALL_DIR/venv"
 ENV_FILE="$INSTALL_DIR/.env"
 REPO_URL="https://github.com/db3net/db3-atlassian-mcp.git"
@@ -145,7 +145,7 @@ with open(config_path, 'r') as f:
 if 'mcpServers' not in config:
     config['mcpServers'] = {}
 
-config['mcpServers']['me-atlassian'] = {
+config['mcpServers']['db3.atlassian-mcp'] = {
     'command': '$PYTHON_PATH',
     'args': ['$SERVER_PATH'],
     'disabled': False,
@@ -163,7 +163,7 @@ import json
 
 config = {
     'mcpServers': {
-        'me-atlassian': {
+        'db3.atlassian-mcp': {
             'command': '$PYTHON_PATH',
             'args': ['$SERVER_PATH'],
             'disabled': False,

@@ -1,9 +1,9 @@
 {
   "mcpServers": {
-    "me-atlassian": {
-      "command": "/Users/dblack/.atlassian-mcp/venv/bin/python3",
+    "db3.atlassian-mcp": {
+      "command": "/Users/dblack/.db3-atlassian-mcp/venv/bin/python3",
       "args": [
-        "/Users/dblack/.atlassian-mcp/server.py"
+        "/Users/dblack/.db3-atlassian-mcp/server.py"
       ],
       "disabled": false,
       "autoApprove": [
