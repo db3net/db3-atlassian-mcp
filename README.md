@@ -145,7 +145,17 @@ The installer prompts for your credentials, sets up a Python venv, validates the
 
 ## Updating
 
-If using `uvx`, it automatically pulls the latest version each time Kiro starts. If installed from source, run the installer again.
+If using `uvx` with `@latest`, it automatically pulls the newest version each time your IDE starts. If installed from source, run the installer again.
+
+### Version Pinning
+
+Using `@latest` is convenient but means updates are applied automatically. For production or security-sensitive environments, pin to a specific version:
+
+```json
+"args": ["db3-atlassian-mcp==1.1.0"]
+```
+
+This way you only get updates when you explicitly change the version number. Check [PyPI](https://pypi.org/project/db3-atlassian-mcp/) for available versions.
 
 ## Uninstall
 
