@@ -9,14 +9,14 @@ Connect your IDE to Jira and Confluence. Read, create, and update tickets and wi
 If you have `uv` installed:
 
 ```bash
-uvx atlassian-mcp-server@latest
+uvx db3-atlassian-mcp@latest
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/omise-us-secops/atlassian-mcp.git
-cd atlassian-mcp
+git clone https://github.com/db3net/db3-atlassian-mcp.git
+cd db3-atlassian-mcp
 bash install.sh
 ```
 

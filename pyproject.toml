@@ -3,11 +3,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "atlassian-mcp-server"
+name = "db3-atlassian-mcp"
 version = "1.0.0"
 description = "Atlassian MCP Server — Jira and Confluence tools for AI IDEs"
 readme = "README.md"
-license = "MIT"
+license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
     { name = "David Black", email = "dblack@merchante.com" },
@@ -30,8 +30,12 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/omise-us-secops/atlassian-mcp"
-Repository = "https://github.com/omise-us-secops/atlassian-mcp"
+Homepage = "https://github.com/db3net/db3-atlassian-mcp"
+Repository = "https://github.com/db3net/db3-atlassian-mcp"
 
 [project.scripts]
-atlassian-mcp-server = "server:mcp.run"
+db3-atlassian-mcp = "server:mcp.run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+include = ["server.py"]
