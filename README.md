@@ -29,6 +29,46 @@ That's it. The script sets up everything and configures your IDE automatically.
 
 Once installed, open Kiro and ask it something like "Can you check if my Atlassian MCP server is connected?" to verify everything is working.
 
+## Configuration
+
+The server reads credentials from a `.env` file. The installer creates this automatically, but you can also set it up manually.
+
+### .env file
+
+Create `~/.atlassian-mcp/.env` with:
+
+```
+JIRA_BASE_URL=https://yourcompany.atlassian.net
+JIRA_USER=you@yourcompany.com
+JIRA_API_KEY=your-api-token-here
+```
+
+The server searches for `.env` in this order:
+1. `~/.atlassian-mcp/.env` (recommended — created by the installer)
+2. `.env` in the current working directory
+
+### MCP config (alternative)
+
+You can also pass credentials via your IDE's MCP config (`~/.kiro/settings/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "me-atlassian": {
+      "command": "uvx",
+      "args": ["db3-atlassian-mcp@latest"],
+      "env": {
+        "JIRA_BASE_URL": "https://yourcompany.atlassian.net",
+        "JIRA_USER": "you@yourcompany.com",
+        "JIRA_API_KEY": "your-api-token-here"
+      }
+    }
+  }
+}
+```
+
+Either approach works. The `.env` file keeps credentials out of your IDE config.
+
 ## What You Can Do
 
 ### Jira
