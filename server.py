@@ -1,4 +1,4 @@
-"""Lightweight Jira MCP server using FastMCP."""
+"""Atlassian MCP Server — Jira and Confluence tools for AI IDEs."""
 
 import base64
 import json
@@ -14,14 +14,20 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
-# Load .env from the venv directory (Kiro doesn't inherit shell env)
-load_dotenv(Path.home() / ".atlassian-mcp" / ".env")
+# Load .env — check common locations
+for env_path in [
+    Path.home() / ".atlassian-mcp" / ".env",
+    Path(".env"),
+]:
+    if env_path.exists():
+        load_dotenv(env_path)
+        break
 
-mcp = FastMCP("jira")
+mcp = FastMCP("atlassian")
 
-JIRA_USER = os.environ.get("JIRA_USER", "dblack@merchante.com")
+JIRA_USER = os.environ.get("JIRA_USER", "")
 JIRA_API_KEY = os.environ.get("JIRA_API_KEY", "")
-JIRA_BASE_URL = os.environ.get("JIRA_BASE_URL", "https://merchante.atlassian.net")
+JIRA_BASE_URL = os.environ.get("JIRA_BASE_URL", "")
 
 
 def _auth_header():

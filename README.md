@@ -4,6 +4,16 @@ Connect your IDE to Jira and Confluence. Read, create, and update tickets and wi
 
 ## Install
 
+### Quick (via uvx)
+
+If you have `uv` installed:
+
+```bash
+uvx atlassian-mcp-server@latest
+```
+
+### From source
+
 ```bash
 git clone https://github.com/omise-us-secops/atlassian-mcp.git
 cd atlassian-mcp
@@ -51,6 +61,4 @@ Then remove the `"me-atlassian"` entry from `~/.kiro/settings/mcp.json`.
 
 ## License
 
-Copyright © 2026 MerchantE, Inc. All rights reserved.
-
-This software is proprietary and confidential. Unauthorized copying, distribution, or use of this software, via any medium, is strictly prohibited.
+MIT
