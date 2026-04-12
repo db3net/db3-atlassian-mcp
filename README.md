@@ -117,9 +117,15 @@ Once connected, ask Kiro something like "Read Jira ticket PROJECT-123" to verify
 
 ### Bitbucket Cloud
 - List repositories in a workspace
+- Search repositories by slug, name, or description
 - Fetch repository metadata
+- List branches and commits
+- Fetch commit details and build statuses
+- List recent Bitbucket Pipelines runs
 - List and inspect pull requests
-- Fetch pull request diffs and comments
+- Fetch pull request diffs, diffstats, comments, and activity
+- Fetch pull request build statuses
+- Summarize pull request status with reviewers, approvals, build status results, and changed files
 - Create pull requests
 - Add pull request comments
 
@@ -164,8 +170,9 @@ BITBUCKET_WORKSPACE=merchante-solutions
 ```
 
 Use a Bitbucket Cloud API token scoped to the operations you need. Read-only
-tools need repository and pull request read scopes. Creating pull requests or
-comments needs write access for pull requests.
+tools need repository and pull request read scopes. Pipeline status tools need
+pipeline read scope. Creating pull requests or comments needs write access for
+pull requests.
 
 ## Alternative: Install from Source
 

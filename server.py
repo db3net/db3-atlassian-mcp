@@ -129,6 +129,10 @@ def _bitbucket_repo_path(workspace: str, repo_slug: str) -> str:
     return f"/repositories/{quote(workspace, safe='')}/{quote(repo_slug, safe='')}"
 
 
+def _bitbucket_repo_ref(repo_slug: str, workspace: str) -> dict:
+    return {"workspace": workspace, "repo_slug": repo_slug, "full_name": f"{workspace}/{repo_slug}"}
+
+
 def _bitbucket_values(resp: dict, max_results: int) -> list:
     values = []
     while isinstance(resp, dict) and "error" not in resp:
@@ -149,6 +153,24 @@ def _bitbucket_user(user: dict | None) -> str | None:
     return user.get("display_name") or user.get("nickname") or user.get("username") or user.get("uuid")
 
 
+def _bitbucket_links(resource: dict) -> dict:
+    links = {}
+    for key, value in (resource.get("links") or {}).items():
+        if isinstance(value, dict) and value.get("href"):
+            links[key] = value.get("href")
+        elif isinstance(value, list):
+            hrefs = [item.get("href") for item in value if isinstance(item, dict) and item.get("href")]
+            if hrefs:
+                links[key] = hrefs
+    return links
+
+
+def _truncate_text(value: str | None, max_chars: int) -> str | None:
+    if value is None or len(value) <= max_chars:
+        return value
+    return f"{value[:max_chars].rstrip()}... [truncated]"
+
+
 def _bitbucket_repo_summary(repo: dict) -> dict:
     return {
         "name": repo.get("name"),
@@ -158,11 +180,7 @@ def _bitbucket_repo_summary(repo: dict) -> dict:
         "is_private": repo.get("is_private"),
         "description": repo.get("description"),
         "mainbranch": (repo.get("mainbranch") or {}).get("name"),
-        "links": {
-            key: value.get("href")
-            for key, value in (repo.get("links") or {}).items()
-            if isinstance(value, dict) and value.get("href")
-        },
+        "links": _bitbucket_links(repo),
         "updated_on": repo.get("updated_on"),
     }
 
@@ -170,22 +188,97 @@ def _bitbucket_repo_summary(repo: dict) -> dict:
 def _bitbucket_pr_summary(pr: dict) -> dict:
     source = pr.get("source") or {}
     destination = pr.get("destination") or {}
+    source_commit = source.get("commit") or {}
+    destination_commit = destination.get("commit") or {}
     return {
         "id": pr.get("id"),
         "title": pr.get("title"),
         "state": pr.get("state"),
         "author": _bitbucket_user(pr.get("author")),
         "source_branch": ((source.get("branch") or {}).get("name")),
+        "source_commit": source_commit.get("hash"),
         "destination_branch": ((destination.get("branch") or {}).get("name")),
+        "destination_commit": destination_commit.get("hash"),
         "created_on": pr.get("created_on"),
         "updated_on": pr.get("updated_on"),
         "comment_count": pr.get("comment_count"),
         "task_count": pr.get("task_count"),
-        "links": {
-            key: value.get("href")
-            for key, value in (pr.get("links") or {}).items()
-            if isinstance(value, dict) and value.get("href")
+        "links": _bitbucket_links(pr),
+    }
+
+
+def _bitbucket_branch_summary(branch: dict) -> dict:
+    target = branch.get("target") or {}
+    return {
+        "name": branch.get("name"),
+        "type": branch.get("type"),
+        "target_hash": target.get("hash"),
+        "target_date": target.get("date"),
+        "target_message": target.get("message"),
+        "links": _bitbucket_links(branch),
+    }
+
+
+def _bitbucket_commit_summary(commit: dict) -> dict:
+    return {
+        "hash": commit.get("hash"),
+        "date": commit.get("date"),
+        "author": (commit.get("author") or {}).get("raw"),
+        "message": _truncate_text(commit.get("message"), 4000),
+        "parents": [
+            parent.get("hash")
+            for parent in commit.get("parents", [])
+            if isinstance(parent, dict) and parent.get("hash")
+        ],
+        "links": _bitbucket_links(commit),
+    }
+
+
+def _bitbucket_status_summary(status: dict) -> dict:
+    return {
+        "key": status.get("key"),
+        "name": status.get("name"),
+        "state": status.get("state"),
+        "description": status.get("description"),
+        "url": status.get("url"),
+        "created_on": status.get("created_on"),
+        "updated_on": status.get("updated_on"),
+        "refname": status.get("refname"),
+    }
+
+
+def _bitbucket_pipeline_summary(pipeline: dict) -> dict:
+    target = pipeline.get("target") or {}
+    selector = target.get("selector") or {}
+    state = pipeline.get("state") or {}
+    result = state.get("result") or {}
+    return {
+        "uuid": pipeline.get("uuid"),
+        "build_number": pipeline.get("build_number"),
+        "created_on": pipeline.get("created_on"),
+        "completed_on": pipeline.get("completed_on"),
+        "state": state.get("name"),
+        "result": result.get("name"),
+        "branch": target.get("ref_name"),
+        "commit": (target.get("commit") or {}).get("hash"),
+        "selector": {
+            "type": selector.get("type"),
+            "pattern": selector.get("pattern"),
         },
+        "creator": _bitbucket_user(pipeline.get("creator")),
+        "links": _bitbucket_links(pipeline),
+    }
+
+
+def _bitbucket_diffstat_summary(item: dict) -> dict:
+    old = item.get("old") or {}
+    new = item.get("new") or {}
+    return {
+        "status": item.get("status"),
+        "lines_added": item.get("lines_added"),
+        "lines_removed": item.get("lines_removed"),
+        "old_path": old.get("path"),
+        "new_path": new.get("path"),
     }
 
 
@@ -197,12 +290,8 @@ def _bitbucket_comment_summary(comment: dict) -> dict:
         "created_on": comment.get("created_on"),
         "updated_on": comment.get("updated_on"),
         "deleted": comment.get("deleted"),
-        "content": content.get("raw") or content.get("markup"),
-        "links": {
-            key: value.get("href")
-            for key, value in (comment.get("links") or {}).items()
-            if isinstance(value, dict) and value.get("href")
-        },
+        "content": _truncate_text(content.get("raw") or content.get("markup"), 4000),
+        "links": _bitbucket_links(comment),
     }
 
 
@@ -928,6 +1017,157 @@ def get_bitbucket_repo(repo_slug: str, workspace: str = "") -> str:
 
 
 @mcp.tool()
+def search_bitbucket_repos(query: str, workspace: str = "", max_results: int = 25) -> str:
+    """Search Bitbucket Cloud repositories by slug, name, or description."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    if not query:
+        return json.dumps({"error": "Missing query", "detail": "query is required"})
+
+    escaped_query = query.replace("\\", "\\\\").replace('"', '\\"')
+    params = {
+        "pagelen": min(max_results, 100),
+        "q": f'slug~"{escaped_query}" OR name~"{escaped_query}" OR description~"{escaped_query}"',
+    }
+    resp = _bitbucket_api(f"/repositories/{quote(workspace, safe='')}?{urlencode(params)}")
+    if isinstance(resp, dict) and "error" not in resp:
+        repos = [_bitbucket_repo_summary(repo) for repo in _bitbucket_values(resp, max_results)]
+        return json.dumps(repos, indent=2)
+
+    fallback = _bitbucket_api(f"/repositories/{quote(workspace, safe='')}?{urlencode({'pagelen': 100})}")
+    if isinstance(fallback, dict) and "error" in fallback:
+        return json.dumps(resp)
+    needle = query.casefold()
+    matches = []
+    for repo in _bitbucket_values(fallback, max(max_results * 4, 100)):
+        searchable = " ".join(
+            str(value or "")
+            for value in [repo.get("slug"), repo.get("name"), repo.get("full_name"), repo.get("description")]
+        ).casefold()
+        if needle in searchable:
+            matches.append(_bitbucket_repo_summary(repo))
+        if len(matches) >= max_results:
+            break
+    return json.dumps(matches, indent=2)
+
+
+@mcp.tool()
+def list_bitbucket_branches(repo_slug: str, workspace: str = "", query: str = "", max_results: int = 25) -> str:
+    """List Bitbucket Cloud branches for a repository, optionally filtered by name."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/refs/branches?{urlencode({'pagelen': 100})}"
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    needle = query.casefold()
+    branches = []
+    for branch in _bitbucket_values(resp, max(max_results * 4, 100)):
+        summary = _bitbucket_branch_summary(branch)
+        if needle and needle not in (summary.get("name") or "").casefold():
+            continue
+        branches.append(summary)
+        if len(branches) >= max_results:
+            break
+    return json.dumps(branches, indent=2)
+
+
+@mcp.tool()
+def list_bitbucket_commits(repo_slug: str, workspace: str = "", branch: str = "", max_results: int = 25) -> str:
+    """List Bitbucket Cloud commits for a repository or branch."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    suffix = f"/{quote(branch, safe='')}" if branch else ""
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/commits{suffix}?{urlencode({'pagelen': min(max_results, 100)})}"
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    commits = [_bitbucket_commit_summary(commit) for commit in _bitbucket_values(resp, max_results)]
+    return json.dumps(commits, indent=2)
+
+
+@mcp.tool()
+def get_bitbucket_commit(repo_slug: str, commit: str, workspace: str = "") -> str:
+    """Fetch a Bitbucket Cloud commit by hash or ref."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    resp = _bitbucket_api(f"{_bitbucket_repo_path(workspace, repo_slug)}/commit/{quote(commit, safe='')}")
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    return json.dumps(_bitbucket_commit_summary(resp), indent=2)
+
+
+@mcp.tool()
+def list_bitbucket_commit_statuses(repo_slug: str, commit: str, workspace: str = "", max_results: int = 25) -> str:
+    """List Bitbucket Cloud build statuses attached to a commit."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    path = (
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/commit/"
+        f"{quote(commit, safe='')}/statuses/build?{urlencode({'pagelen': min(max_results, 100)})}"
+    )
+    resp = _bitbucket_api(path)
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    statuses = [_bitbucket_status_summary(status) for status in _bitbucket_values(resp, max_results)]
+    return json.dumps(statuses, indent=2)
+
+
+@mcp.tool()
+def list_bitbucket_pull_request_statuses(repo_slug: str, pull_request_id: int, workspace: str = "", max_results: int = 25) -> str:
+    """List Bitbucket Cloud build statuses attached to a pull request."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    path = (
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/"
+        f"{pull_request_id}/statuses?{urlencode({'pagelen': min(max_results, 100)})}"
+    )
+    resp = _bitbucket_api(path)
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    statuses = [_bitbucket_status_summary(status) for status in _bitbucket_values(resp, max_results)]
+    return json.dumps(statuses, indent=2)
+
+
+@mcp.tool()
+def list_bitbucket_pipelines(repo_slug: str, workspace: str = "", branch: str = "", max_results: int = 10) -> str:
+    """List recent Bitbucket Pipelines runs for a repository, optionally filtered by branch."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    params = {"pagelen": min(max_results, 100)}
+    if branch:
+        params["target.ref_name"] = branch
+    resp = _bitbucket_api(f"{_bitbucket_repo_path(workspace, repo_slug)}/pipelines/?{urlencode(params)}")
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    pipelines = [_bitbucket_pipeline_summary(pipeline) for pipeline in _bitbucket_values(resp, max_results)]
+    return json.dumps(pipelines, indent=2)
+
+
+@mcp.tool()
 def list_bitbucket_pull_requests(repo_slug: str, workspace: str = "", state: str = "OPEN", max_results: int = 25) -> str:
     """List Bitbucket Cloud pull requests for a repository."""
     try:
@@ -996,6 +1236,33 @@ def get_bitbucket_pull_request_diff(repo_slug: str, pull_request_id: int, worksp
 
 
 @mcp.tool()
+def get_bitbucket_pull_request_diffstat(repo_slug: str, pull_request_id: int, workspace: str = "", max_results: int = 100) -> str:
+    """Fetch Bitbucket Cloud pull request file-level diff statistics."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/"
+        f"{pull_request_id}/diffstat?{urlencode({'pagelen': min(max_results, 100)})}"
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    files = [_bitbucket_diffstat_summary(item) for item in _bitbucket_values(resp, max_results)]
+    return json.dumps({
+        "repo": _bitbucket_repo_ref(repo_slug, workspace),
+        "pull_request_id": pull_request_id,
+        "files": files,
+        "totals": {
+            "files": len(files),
+            "lines_added": sum(item.get("lines_added") or 0 for item in files),
+            "lines_removed": sum(item.get("lines_removed") or 0 for item in files),
+        },
+    }, indent=2)
+
+
+@mcp.tool()
 def list_bitbucket_pull_request_comments(repo_slug: str, pull_request_id: int, workspace: str = "", max_results: int = 50) -> str:
     """List Bitbucket Cloud pull request comments."""
     try:
@@ -1015,6 +1282,119 @@ def list_bitbucket_pull_request_comments(repo_slug: str, pull_request_id: int, w
         for comment in _bitbucket_values(resp, max_results)
     ]
     return json.dumps(comments, indent=2)
+
+
+@mcp.tool()
+def list_bitbucket_pull_request_activity(repo_slug: str, pull_request_id: int, workspace: str = "", max_results: int = 50) -> str:
+    """List Bitbucket Cloud pull request activity events."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    path = (
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/"
+        f"{pull_request_id}/activity?{urlencode({'pagelen': min(max_results, 100)})}"
+    )
+    resp = _bitbucket_api(path)
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+
+    activities = []
+    for item in _bitbucket_values(resp, max_results):
+        update = item.get("update") or {}
+        approval = item.get("approval") or {}
+        comment = item.get("comment") or {}
+        activity = {
+            "type": next((key for key in ["update", "approval", "comment"] if item.get(key)), None),
+            "created_on": item.get("created_on") or update.get("date") or approval.get("date") or comment.get("created_on"),
+            "user": _bitbucket_user(item.get("user") or update.get("author") or approval.get("user") or comment.get("user")),
+        }
+        if update:
+            activity["state"] = update.get("state")
+            activity["description"] = _truncate_text(update.get("description"), 1200)
+        if approval:
+            activity["approved"] = True
+        if comment:
+            activity["comment"] = _bitbucket_comment_summary(comment)
+        activities.append(activity)
+    return json.dumps(activities, indent=2)
+
+
+@mcp.tool()
+def get_bitbucket_pull_request_status(repo_slug: str, pull_request_id: int, workspace: str = "", max_files: int = 25) -> str:
+    """Fetch a compact pull request status summary with reviewers, builds, and changed files."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    pr = _bitbucket_api(f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}")
+    if isinstance(pr, dict) and "error" in pr:
+        return json.dumps(pr)
+
+    summary = _bitbucket_pr_summary(pr)
+    source_commit = summary.get("source_commit")
+    statuses = []
+    status_error = None
+    if source_commit:
+        status_resp = _bitbucket_api(
+            f"{_bitbucket_repo_path(workspace, repo_slug)}/commit/"
+            f"{quote(source_commit, safe='')}/statuses/build?{urlencode({'pagelen': 50})}"
+        )
+        if isinstance(status_resp, dict) and "error" not in status_resp:
+            statuses = [_bitbucket_status_summary(status) for status in _bitbucket_values(status_resp, 50)]
+        else:
+            status_error = status_resp if isinstance(status_resp, dict) else None
+
+    pr_status_resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/statuses?{urlencode({'pagelen': 50})}"
+    )
+    if not statuses and isinstance(pr_status_resp, dict) and "error" not in pr_status_resp:
+        statuses = [_bitbucket_status_summary(status) for status in _bitbucket_values(pr_status_resp, 50)]
+    elif isinstance(pr_status_resp, dict) and "error" in pr_status_resp and not source_commit:
+        status_error = pr_status_resp
+
+    diffstat_resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/diffstat?{urlencode({'pagelen': 100})}"
+    )
+    files = []
+    if isinstance(diffstat_resp, dict) and "error" not in diffstat_resp:
+        files = [_bitbucket_diffstat_summary(item) for item in _bitbucket_values(diffstat_resp, 100)]
+
+    participants = [
+        {
+            "user": _bitbucket_user(participant.get("user")),
+            "role": participant.get("role"),
+            "approved": participant.get("approved"),
+            "state": participant.get("state"),
+        }
+        for participant in pr.get("participants", [])
+    ]
+    reviewers = [_bitbucket_user(user) for user in pr.get("reviewers", [])]
+    status_counts = {
+        state: sum(1 for status in statuses if status.get("state") == state)
+        for state in sorted({status.get("state") for status in statuses if status.get("state")})
+    }
+    approved_by = [participant["user"] for participant in participants if participant.get("approved")]
+
+    return json.dumps({
+        "repo": _bitbucket_repo_ref(repo_slug, workspace),
+        "pull_request": summary,
+        "reviewers": reviewers,
+        "approved_by": approved_by,
+        "participants": participants,
+        "build_statuses": statuses,
+        "build_status_counts": status_counts,
+        "build_status_error": status_error if not statuses else None,
+        "changed_files": files[:max_files],
+        "changed_files_truncated": len(files) > max_files,
+        "change_totals": {
+            "files": len(files),
+            "lines_added": sum(item.get("lines_added") or 0 for item in files),
+            "lines_removed": sum(item.get("lines_removed") or 0 for item in files),
+        },
+    }, indent=2)
 
 
 @mcp.tool()
