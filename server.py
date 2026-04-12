@@ -32,8 +32,16 @@ JIRA_USER = os.environ.get("JIRA_USER", "")
 JIRA_API_KEY = os.environ.get("JIRA_API_KEY", "")
 JIRA_BASE_URL = os.environ.get("JIRA_BASE_URL", "")
 _FIELD_NAME_CACHE: dict[str, str] | None = None
+_FIELD_METADATA_CACHE: list[dict] | None = None
 _DEFAULT_CUSTOM_FIELD_EXCLUDE_VALUES = {"Pending", "___________________", "{}"}
 _DEFAULT_CUSTOM_FIELD_EXCLUDE_NAMES = {"HARDWARE NEEDED"}
+_DEFAULT_RICH_TEXT_FIELD_NAMES = {
+    "Back-Out Procedure",
+    "(Business) Impact of Change",
+    "Planned Activity List",
+    "Reason for Change",
+    "Test Plan",
+}
 
 
 def _env_set(name: str) -> set[str]:
@@ -99,16 +107,52 @@ def _get_field_names() -> dict[str, str]:
     if _FIELD_NAME_CACHE is not None:
         return _FIELD_NAME_CACHE
 
-    resp = _api("/field")
-    if isinstance(resp, dict) and "error" in resp:
-        return {}
-
     _FIELD_NAME_CACHE = {
         field.get("id"): field.get("name")
-        for field in resp
+        for field in _get_field_metadata()
         if isinstance(field, dict) and field.get("id") and field.get("name")
     }
     return _FIELD_NAME_CACHE
+
+
+def _get_field_metadata() -> list[dict]:
+    """Return Jira field metadata from /field, cached after first lookup."""
+    global _FIELD_METADATA_CACHE
+    if _FIELD_METADATA_CACHE is not None:
+        return _FIELD_METADATA_CACHE
+
+    resp = _api("/field")
+    if isinstance(resp, dict) and "error" in resp:
+        return []
+
+    _FIELD_METADATA_CACHE = [field for field in resp if isinstance(field, dict)]
+    return _FIELD_METADATA_CACHE
+
+
+def _field_by_id(field_id: str) -> dict | None:
+    for field in _get_field_metadata():
+        if field.get("id") == field_id:
+            return field
+    return None
+
+
+def _field_by_name(field_name: str) -> dict | None:
+    target = field_name.casefold()
+    matches = [
+        field for field in _get_field_metadata()
+        if field.get("name", "").casefold() == target
+    ]
+    return matches[0] if matches else None
+
+
+def _resolve_field_key(field_key: str) -> tuple[str, dict | None]:
+    """Resolve either a Jira field ID or display name to a Jira field ID."""
+    if field_key.startswith("customfield_") or _field_by_id(field_key):
+        return field_key, _field_by_id(field_key)
+    field = _field_by_name(field_key)
+    if not field:
+        return field_key, None
+    return field["id"], field
 
 
 def _is_empty_field_value(value) -> bool:
@@ -499,13 +543,65 @@ def _text_to_adf(text: str) -> dict:
     return {"type": "doc", "version": 1, "content": content}
 
 
+def _is_rich_text_field(field: dict | None) -> bool:
+    if not field:
+        return False
+    field_name = field.get("name", "")
+    schema = field.get("schema") or {}
+    custom_type = schema.get("custom", "")
+    return (
+        field_name in _DEFAULT_RICH_TEXT_FIELD_NAMES
+        or field_name in _env_set("JIRA_RICH_TEXT_FIELD_NAMES")
+        or custom_type.endswith(":textarea")
+    )
+
+
+def _normalize_field_write_value(field_id: str, field: dict | None, value):
+    """Convert human-friendly field values to Jira REST field payload values."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+
+    schema = (field or {}).get("schema") or {}
+    schema_type = schema.get("type")
+    schema_items = schema.get("items")
+    custom_type = schema.get("custom", "")
+
+    if schema_type == "user":
+        return {"accountId": _resolve_user(str(value))}
+
+    if schema_type == "array" and schema_items == "user":
+        values = value if isinstance(value, list) else [value]
+        return [{"accountId": _resolve_user(str(item))} for item in values]
+
+    if schema_type == "option" or custom_type.endswith(":select"):
+        return {"value": str(value)}
+
+    if schema_type == "array" and (
+        schema_items == "option" or custom_type.endswith(":multiselect")
+    ):
+        values = value if isinstance(value, list) else [value]
+        return [{"value": str(item)} for item in values]
+
+    if _is_rich_text_field(field):
+        return _text_to_adf(str(value))
+
+    return value
+
+
 def _merge_custom_fields(fields: dict, custom_fields: dict | None) -> dict | str:
     """Merge arbitrary Jira fields into a fields payload."""
     if custom_fields is None:
         return fields
     if not isinstance(custom_fields, dict):
         return "custom_fields must be a JSON object"
-    fields.update(custom_fields)
+    for field_key, value in custom_fields.items():
+        field_id, field = _resolve_field_key(field_key)
+        try:
+            fields[field_id] = _normalize_field_write_value(field_id, field, value)
+        except ValueError as e:
+            return f"{field_key}: {e}"
     return fields
 
 
@@ -580,6 +676,55 @@ def _confluence_api(path, method="GET", data=None, api_version="v2"):
     except HTTPError as e:
         error_body = e.read().decode() if e.fp else ""
         return {"error": f"HTTP {e.code}", "detail": error_body}
+
+
+def _summarize_allowed_value(value):
+    if not isinstance(value, dict):
+        return value
+    for key in ("value", "name", "displayName"):
+        if value.get(key):
+            return value[key]
+    if value.get("id"):
+        return value["id"]
+    return value
+
+
+@mcp.tool()
+def get_create_fields(project_key: str, issue_type: str) -> str:
+    """List Jira fields available when creating a ticket, including IDs, names, required flags, schemas, and allowed values."""
+    resp = _api(
+        f"/issue/createmeta?projectKeys={quote(project_key)}"
+        f"&issuetypeNames={quote(issue_type)}"
+        "&expand=projects.issuetypes.fields"
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+
+    fields = {}
+    for project in resp.get("projects", []):
+        for issue_type_meta in project.get("issuetypes", []):
+            if issue_type_meta.get("name") == issue_type:
+                fields = issue_type_meta.get("fields", {}) or {}
+                break
+        if fields:
+            break
+
+    result = []
+    for field_id, meta in fields.items():
+        allowed_values = meta.get("allowedValues") or []
+        result.append({
+            "id": field_id,
+            "name": meta.get("name"),
+            "required": bool(meta.get("required")),
+            "schema": meta.get("schema"),
+            "allowed_values": [
+                _summarize_allowed_value(value)
+                for value in allowed_values[:50]
+            ],
+        })
+
+    result.sort(key=lambda item: (not item["required"], item.get("name") or item["id"]))
+    return json.dumps(result, indent=2)
 
 
 @mcp.tool()
