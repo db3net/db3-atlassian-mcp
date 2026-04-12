@@ -1,9 +1,12 @@
 """Atlassian MCP Server — Jira and Confluence tools for AI IDEs."""
 
+from __future__ import annotations
+
 import base64
 import json
 import os
 import re
+from html import escape
 from html.parser import HTMLParser
 from urllib.error import HTTPError
 from urllib.parse import quote
@@ -126,8 +129,96 @@ def _strip_html(html_string: str) -> str:
     return "\n".join(result)
 
 
+def _inline_segments(value: str) -> list[tuple[str, str | None]]:
+    """Split a text span into plain/marked inline segments."""
+    segments: list[tuple[str, str | None]] = []
+    pos = 0
+    patterns = [
+        (re.compile(r"`([^`]+)`"), "code"),
+        (re.compile(r"\{\{([^{}]+)\}\}"), "code"),
+        (re.compile(r"\*\*([^*]+)\*\*"), "strong"),
+        (re.compile(r"(?<!\*)\*([^*\n]+)\*(?!\*)"), "em"),
+    ]
+
+    while pos < len(value):
+        matches = [
+            (match.start(), match.end(), match.group(1), mark)
+            for pattern, mark in patterns
+            for match in [pattern.search(value, pos)]
+            if match
+        ]
+        if not matches:
+            segments.append((value[pos:], None))
+            break
+        start, end, marked_text, mark = min(matches, key=lambda item: item[0])
+        if start > pos:
+            segments.append((value[pos:start], None))
+        segments.append((marked_text, mark))
+        pos = end
+
+    return [(segment, mark) for segment, mark in segments if segment]
+
+
+def _adf_inline_nodes(value: str) -> list[dict]:
+    mark_types = {
+        "code": "code",
+        "strong": "strong",
+        "em": "em",
+    }
+    nodes = []
+    for segment, mark in _inline_segments(value):
+        node = {"type": "text", "text": segment}
+        if mark:
+            node["marks"] = [{"type": mark_types[mark]}]
+        nodes.append(node)
+    return nodes
+
+
+def _storage_inline(value: str) -> str:
+    tags = {
+        "code": "code",
+        "strong": "strong",
+        "em": "em",
+    }
+    parts = []
+    for segment, mark in _inline_segments(value):
+        escaped = escape(segment)
+        if mark:
+            tag = tags[mark]
+            parts.append(f"<{tag}>{escaped}</{tag}>")
+        else:
+            parts.append(escaped)
+    return "".join(parts)
+
+
+def _is_fence(line: str) -> re.Match | None:
+    return re.match(r"^```(\S*)\s*$", line.strip())
+
+
+def _heading_match(line: str) -> tuple[int, str] | None:
+    stripped = line.strip()
+    markdown_heading = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+    if markdown_heading:
+        return len(markdown_heading.group(1)), markdown_heading.group(2)
+    jira_heading = re.match(r"^h([1-6])\.\s+(.+)$", stripped)
+    if jira_heading:
+        return int(jira_heading.group(1)), jira_heading.group(2)
+    return None
+
+
+def _list_match(line: str) -> tuple[str, str, str] | None:
+    stripped = line.strip()
+    bullet = re.match(r"^[-*]\s+(.+)$", stripped)
+    if bullet:
+        return "bullet", r"^[-*]\s+(.+)$", bullet.group(1)
+    ordered = re.match(r"^\d+\.\s+(.+)$", stripped)
+    if ordered:
+        return "ordered", r"^\d+\.\s+(.+)$", ordered.group(1)
+    return None
+
+
 def _text_to_storage(text: str) -> str:
-    """Convert plain text to Confluence storage format XHTML.
+    """Convert markdown-ish text to Confluence storage format XHTML.
 
     If the text already contains HTML tags, it is returned as-is
     (assumed to be pre-formatted storage format).
@@ -136,19 +227,173 @@ def _text_to_storage(text: str) -> str:
         return ""
     if "<" in text and ">" in text:
         return text
-    return "".join(f"<p>{line}</p>" for line in text.split("\n") if line)
+
+    content: list[str] = []
+    paragraph_lines: list[str] = []
+    lines = text.splitlines()
+    i = 0
+
+    def flush_paragraph() -> None:
+        if paragraph_lines:
+            paragraph = " ".join(line.strip() for line in paragraph_lines)
+            content.append(f"<p>{_storage_inline(paragraph)}</p>")
+            paragraph_lines.clear()
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        if not stripped:
+            flush_paragraph()
+            i += 1
+            continue
+
+        fence = _is_fence(stripped)
+        if fence:
+            flush_paragraph()
+            code_lines: list[str] = []
+            i += 1
+            while i < len(lines) and not _is_fence(lines[i]):
+                code_lines.append(lines[i])
+                i += 1
+            if i < len(lines):
+                i += 1
+            code = "\n".join(code_lines).replace("]]>", "]]]]><![CDATA[>")
+            content.append(
+                '<ac:structured-macro ac:name="code">'
+                f"<ac:plain-text-body><![CDATA[{code}]]></ac:plain-text-body>"
+                "</ac:structured-macro>"
+            )
+            continue
+
+        heading = _heading_match(stripped)
+        if heading:
+            flush_paragraph()
+            level, heading_text = heading
+            content.append(f"<h{level}>{_storage_inline(heading_text)}</h{level}>")
+            i += 1
+            continue
+
+        list_match = _list_match(stripped)
+        if list_match:
+            flush_paragraph()
+            kind, marker_re, first_item = list_match
+            items = [first_item]
+            i += 1
+            while i < len(lines):
+                item_match = re.match(marker_re, lines[i].strip())
+                if not item_match:
+                    break
+                items.append(item_match.group(1))
+                i += 1
+            tag = "ul" if kind == "bullet" else "ol"
+            body = "".join(f"<li>{_storage_inline(item)}</li>" for item in items)
+            content.append(f"<{tag}>{body}</{tag}>")
+            continue
+
+        paragraph_lines.append(line)
+        i += 1
+
+    flush_paragraph()
+    return "".join(content)
 
 
 def _text_to_adf(text: str) -> dict:
-    """Convert plain text to Atlassian Document Format JSON."""
+    """Convert markdown-ish text to Atlassian Document Format JSON."""
     if not text:
         return {"type": "doc", "version": 1, "content": []}
-    paragraphs = [
-        {"type": "paragraph", "content": [{"type": "text", "text": line}]}
-        for line in text.split("\n")
-        if line
-    ]
-    return {"type": "doc", "version": 1, "content": paragraphs}
+
+    def paragraph_node(value: str) -> dict:
+        content = _adf_inline_nodes(value)
+        return {"type": "paragraph", "content": content} if content else {"type": "paragraph"}
+
+    def heading_node(value: str, level: int) -> dict:
+        return {
+            "type": "heading",
+            "attrs": {"level": max(1, min(level, 6))},
+            "content": _adf_inline_nodes(value),
+        }
+
+    def code_block_node(value: str, language: str = "") -> dict:
+        node = {
+            "type": "codeBlock",
+            "content": [{"type": "text", "text": value.rstrip("\n")}],
+        }
+        if language:
+            node["attrs"] = {"language": language}
+        return node
+
+    def list_node(kind: str, items: list[str]) -> dict:
+        return {
+            "type": kind,
+            "content": [
+                {"type": "listItem", "content": [paragraph_node(item)]}
+                for item in items
+            ],
+        }
+
+    content: list[dict] = []
+    paragraph_lines: list[str] = []
+    lines = text.splitlines()
+    i = 0
+
+    def flush_paragraph() -> None:
+        if paragraph_lines:
+            content.append(paragraph_node(" ".join(line.strip() for line in paragraph_lines)))
+            paragraph_lines.clear()
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        if not stripped:
+            flush_paragraph()
+            i += 1
+            continue
+
+        fence = _is_fence(stripped)
+        if fence:
+            flush_paragraph()
+            language = fence.group(1)
+            code_lines: list[str] = []
+            i += 1
+            while i < len(lines) and not _is_fence(lines[i]):
+                code_lines.append(lines[i])
+                i += 1
+            if i < len(lines):
+                i += 1
+            content.append(code_block_node("\n".join(code_lines), language))
+            continue
+
+        heading = _heading_match(stripped)
+        if heading:
+            flush_paragraph()
+            level, heading_text = heading
+            content.append(heading_node(heading_text, level))
+            i += 1
+            continue
+
+        list_match = _list_match(stripped)
+        if list_match:
+            flush_paragraph()
+            kind, marker_re, first_item = list_match
+            items = [first_item]
+            i += 1
+            while i < len(lines):
+                item_match = re.match(marker_re, lines[i].strip())
+                if not item_match:
+                    break
+                items.append(item_match.group(1))
+                i += 1
+            node_type = "bulletList" if kind == "bullet" else "orderedList"
+            content.append(list_node(node_type, items))
+            continue
+
+        paragraph_lines.append(line)
+        i += 1
+
+    flush_paragraph()
+    return {"type": "doc", "version": 1, "content": content}
 
 
 def _resolve_user(query: str) -> str:
