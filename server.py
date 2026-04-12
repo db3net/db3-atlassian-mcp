@@ -151,6 +151,16 @@ def _text_to_adf(text: str) -> dict:
     return {"type": "doc", "version": 1, "content": paragraphs}
 
 
+def _merge_custom_fields(fields: dict, custom_fields: dict | None) -> dict | str:
+    """Merge arbitrary Jira fields into a fields payload."""
+    if custom_fields is None:
+        return fields
+    if not isinstance(custom_fields, dict):
+        return "custom_fields must be a JSON object"
+    fields.update(custom_fields)
+    return fields
+
+
 def _resolve_user(query: str) -> str:
     """Resolve a display name or email to a Jira account ID.
 
@@ -271,8 +281,8 @@ def get_child_issues(issue_key: str) -> str:
 
 
 @mcp.tool()
-def create_ticket(project_key: str, summary: str, issue_type: str, description: str = "", assignee: str = "", priority: str = "", parent_key: str = "") -> str:
-    """Create a new Jira ticket. Requires project key, summary, and issue type name. Optionally set a parent issue key to create a sub-task."""
+def create_ticket(project_key: str, summary: str, issue_type: str, description: str = "", assignee: str = "", priority: str = "", parent_key: str = "", custom_fields: dict | None = None) -> str:
+    """Create a new Jira ticket. Optionally pass custom_fields for Jira customfield_* or other fields."""
     for field_name, value in [("project_key", project_key), ("summary", summary), ("issue_type", issue_type)]:
         if not value:
             return json.dumps({"error": "Missing required field", "detail": f"{field_name} is required"})
@@ -294,6 +304,10 @@ def create_ticket(project_key: str, summary: str, issue_type: str, description: 
             return json.dumps({"error": "Invalid assignee", "detail": str(e)})
     if priority:
         fields["priority"] = {"name": priority}
+    merged_fields = _merge_custom_fields(fields, custom_fields)
+    if isinstance(merged_fields, str):
+        return json.dumps({"error": "Invalid custom_fields", "detail": merged_fields})
+    fields = merged_fields
 
     resp = _api("/issue", method="POST", data={"fields": fields})
     if "error" in resp:
@@ -304,8 +318,8 @@ def create_ticket(project_key: str, summary: str, issue_type: str, description: 
 
 
 @mcp.tool()
-def update_ticket(issue_key: str, summary: str = "", description: str = "", assignee: str = "", priority: str = "", transition: str = "", comment: str = "") -> str:
-    """Update a Jira ticket. Can change fields, transition status, and/or add a comment."""
+def update_ticket(issue_key: str, summary: str = "", description: str = "", assignee: str = "", priority: str = "", transition: str = "", comment: str = "", custom_fields: dict | None = None) -> str:
+    """Update a Jira ticket. Can change standard fields, custom_fields, transition status, and/or add a comment."""
     # 1. Field updates
     fields = {}
     if summary:
@@ -320,6 +334,10 @@ def update_ticket(issue_key: str, summary: str = "", description: str = "", assi
             return json.dumps({"error": "Invalid assignee", "detail": str(e)})
     if priority:
         fields["priority"] = {"name": priority}
+    merged_fields = _merge_custom_fields(fields, custom_fields)
+    if isinstance(merged_fields, str):
+        return json.dumps({"error": "Invalid custom_fields", "detail": merged_fields})
+    fields = merged_fields
     if fields:
         resp = _api(f"/issue/{issue_key}", method="PUT", data={"fields": fields})
         if resp and "error" in resp:
