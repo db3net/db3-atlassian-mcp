@@ -32,6 +32,24 @@ JIRA_USER = os.environ.get("JIRA_USER", "")
 JIRA_API_KEY = os.environ.get("JIRA_API_KEY", "")
 JIRA_BASE_URL = os.environ.get("JIRA_BASE_URL", "")
 _FIELD_NAME_CACHE: dict[str, str] | None = None
+_DEFAULT_CUSTOM_FIELD_EXCLUDE_VALUES = {"Pending", "___________________", "{}"}
+_DEFAULT_CUSTOM_FIELD_EXCLUDE_NAMES = {"HARDWARE NEEDED"}
+
+
+def _env_set(name: str) -> set[str]:
+    return {
+        value.strip()
+        for value in os.environ.get(name, "").split(",")
+        if value.strip()
+    }
+
+
+def _custom_field_exclude_names() -> set[str]:
+    return _DEFAULT_CUSTOM_FIELD_EXCLUDE_NAMES | _env_set("JIRA_CUSTOM_FIELD_EXCLUDE_NAMES")
+
+
+def _custom_field_exclude_values() -> set[str]:
+    return _DEFAULT_CUSTOM_FIELD_EXCLUDE_VALUES | _env_set("JIRA_CUSTOM_FIELD_EXCLUDE_VALUES")
 
 
 def _auth_header():
@@ -128,7 +146,19 @@ def _normalize_jira_field_value(value):
     return value
 
 
-def _custom_fields(fields: dict) -> dict:
+def _is_noisy_custom_field(field_name: str, value) -> bool:
+    if field_name in _custom_field_exclude_names():
+        return True
+
+    exclude_values = _custom_field_exclude_values()
+    if isinstance(value, str):
+        return value.strip() in exclude_values
+    if isinstance(value, list):
+        return bool(value) and all(_is_noisy_custom_field(field_name, item) for item in value)
+    return False
+
+
+def _custom_fields(fields: dict, include_noise: bool = False) -> dict:
     """Extract populated customfield_* values keyed by human-readable field name."""
     field_names = _get_field_names()
     custom = {}
@@ -139,6 +169,8 @@ def _custom_fields(fields: dict) -> dict:
         if _is_empty_field_value(normalized):
             continue
         field_name = field_names.get(field_id, field_id)
+        if not include_noise and _is_noisy_custom_field(field_name, normalized):
+            continue
         if field_name in custom:
             field_name = f"{field_name} ({field_id})"
         custom[field_name] = normalized
@@ -551,7 +583,7 @@ def _confluence_api(path, method="GET", data=None, api_version="v2"):
 
 
 @mcp.tool()
-def get_ticket(issue_key: str) -> str:
+def get_ticket(issue_key: str, include_noisy_custom_fields: bool = False) -> str:
     """Fetch a Jira ticket by key (e.g. INFOSEC-2239). Returns standard fields, description, and populated custom fields."""
     resp = _api(f"/issue/{issue_key}")
     if "error" in resp:
@@ -566,7 +598,7 @@ def get_ticket(issue_key: str) -> str:
         "priority": fields.get("priority", {}).get("name"),
         "type": fields.get("issuetype", {}).get("name"),
         "description": _extract_text(fields.get("description")),
-        "custom_fields": _custom_fields(fields),
+        "custom_fields": _custom_fields(fields, include_noise=include_noisy_custom_fields),
     }
     return json.dumps(result, indent=2)
 
