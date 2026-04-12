@@ -31,6 +31,7 @@ mcp = FastMCP("atlassian")
 JIRA_USER = os.environ.get("JIRA_USER", "")
 JIRA_API_KEY = os.environ.get("JIRA_API_KEY", "")
 JIRA_BASE_URL = os.environ.get("JIRA_BASE_URL", "")
+_FIELD_NAME_CACHE: dict[str, str] | None = None
 
 
 def _auth_header():
@@ -72,6 +73,76 @@ def _extract_text(content):
         for item in content:
             parts.append(_extract_text(item))
     return "\n".join(p for p in parts if p)
+
+
+def _get_field_names() -> dict[str, str]:
+    """Return Jira field IDs mapped to display names."""
+    global _FIELD_NAME_CACHE
+    if _FIELD_NAME_CACHE is not None:
+        return _FIELD_NAME_CACHE
+
+    resp = _api("/field")
+    if isinstance(resp, dict) and "error" in resp:
+        return {}
+
+    _FIELD_NAME_CACHE = {
+        field.get("id"): field.get("name")
+        for field in resp
+        if isinstance(field, dict) and field.get("id") and field.get("name")
+    }
+    return _FIELD_NAME_CACHE
+
+
+def _is_empty_field_value(value) -> bool:
+    return value is None or value == "" or value == [] or value == {}
+
+
+def _normalize_jira_field_value(value):
+    """Convert Jira field values to compact JSON-friendly values."""
+    if _is_empty_field_value(value):
+        return None
+
+    if isinstance(value, dict):
+        if value.get("type") == "doc":
+            return _extract_text(value)
+        if "displayName" in value:
+            return value.get("displayName")
+        if "value" in value:
+            if isinstance(value.get("child"), dict) and value["child"].get("value"):
+                return f"{value.get('value')} - {value['child'].get('value')}"
+            return value.get("value")
+        if "name" in value:
+            return value.get("name")
+        if "content" in value:
+            return _extract_text(value)
+        return value
+
+    if isinstance(value, list):
+        normalized = [
+            item
+            for item in (_normalize_jira_field_value(item) for item in value)
+            if not _is_empty_field_value(item)
+        ]
+        return normalized or None
+
+    return value
+
+
+def _custom_fields(fields: dict) -> dict:
+    """Extract populated customfield_* values keyed by human-readable field name."""
+    field_names = _get_field_names()
+    custom = {}
+    for field_id, value in fields.items():
+        if not field_id.startswith("customfield_"):
+            continue
+        normalized = _normalize_jira_field_value(value)
+        if _is_empty_field_value(normalized):
+            continue
+        field_name = field_names.get(field_id, field_id)
+        if field_name in custom:
+            field_name = f"{field_name} ({field_id})"
+        custom[field_name] = normalized
+    return custom
 
 
 class _HTMLTextExtractor(HTMLParser):
@@ -481,7 +552,7 @@ def _confluence_api(path, method="GET", data=None, api_version="v2"):
 
 @mcp.tool()
 def get_ticket(issue_key: str) -> str:
-    """Fetch a Jira ticket by key (e.g. INFOSEC-2239). Returns summary, status, assignee, and description."""
+    """Fetch a Jira ticket by key (e.g. INFOSEC-2239). Returns standard fields, description, and populated custom fields."""
     resp = _api(f"/issue/{issue_key}")
     if "error" in resp:
         return json.dumps(resp)
@@ -495,6 +566,7 @@ def get_ticket(issue_key: str) -> str:
         "priority": fields.get("priority", {}).get("name"),
         "type": fields.get("issuetype", {}).get("name"),
         "description": _extract_text(fields.get("description")),
+        "custom_fields": _custom_fields(fields),
     }
     return json.dumps(result, indent=2)
 
