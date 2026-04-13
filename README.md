@@ -17,6 +17,11 @@ cat > ~/.db3-atlassian-mcp/.env << EOF
 JIRA_BASE_URL=https://yourcompany.atlassian.net
 JIRA_USER=you@yourcompany.com
 JIRA_API_KEY=your-api-token-here
+
+# Optional: Bitbucket Cloud
+BITBUCKET_WORKSPACE=your-workspace
+BITBUCKET_USER=you@yourcompany.com
+BITBUCKET_API_TOKEN=your-bitbucket-api-token
 EOF
 ```
 
@@ -110,6 +115,20 @@ Once connected, ask Kiro something like "Read Jira ticket PROJECT-123" to verify
 - Create new pages (with optional parent page)
 - Update existing pages with rich formatting
 
+### Bitbucket Cloud
+- List repositories in a workspace
+- Search repositories by slug, name, or description
+- Fetch repository metadata
+- List branches and commits
+- Fetch commit details and build statuses
+- List recent Bitbucket Pipelines runs
+- List and inspect pull requests
+- Fetch pull request diffs, diffstats, comments, and activity
+- Fetch pull request build statuses
+- Summarize pull request status with reviewers, approvals, build status results, and changed files
+- Create pull requests
+- Add pull request comments
+
 ## Configuration
 
 The server reads credentials from a `.env` file. It searches in this order:
@@ -132,6 +151,28 @@ You can also pass credentials via your MCP config's `env` block:
 ```
 
 Either approach works. The `.env` file keeps credentials out of your IDE config.
+
+### Bitbucket Cloud
+
+Bitbucket support is optional. Set these values only if you want Bitbucket tools:
+
+```bash
+BITBUCKET_WORKSPACE=your-workspace
+BITBUCKET_USER=you@yourcompany.com
+BITBUCKET_API_TOKEN=your-bitbucket-api-token
+```
+
+`BITBUCKET_WORKSPACE` lets tool calls omit the workspace argument. For
+`bitbucket.org/merchante-solutions/...`, use:
+
+```bash
+BITBUCKET_WORKSPACE=merchante-solutions
+```
+
+Use a Bitbucket Cloud API token scoped to the operations you need. Read-only
+tools need repository and pull request read scopes. Pipeline status tools need
+pipeline read scope. Creating pull requests or comments needs write access for
+pull requests.
 
 ## Alternative: Install from Source
 
