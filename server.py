@@ -84,7 +84,7 @@ def _api(path, method="GET", data=None):
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    body = json.dumps(data).encode() if data else None
+    body = json.dumps(data).encode() if data is not None else None
     req = Request(url, data=body, headers=headers, method=method)
     try:
         with urlopen(req, timeout=30) as resp:
@@ -104,7 +104,7 @@ def _bitbucket_api(path, method="GET", data=None, parse_json=True):
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    body = json.dumps(data).encode() if data else None
+    body = json.dumps(data).encode() if data is not None else None
     req = Request(url, data=body, headers=headers, method=method)
     try:
         with urlopen(req, timeout=30) as resp:
@@ -284,14 +284,159 @@ def _bitbucket_diffstat_summary(item: dict) -> dict:
 
 def _bitbucket_comment_summary(comment: dict) -> dict:
     content = comment.get("content") or {}
+    parent = comment.get("parent") or {}
     return {
         "id": comment.get("id"),
         "user": _bitbucket_user(comment.get("user")),
         "created_on": comment.get("created_on"),
         "updated_on": comment.get("updated_on"),
         "deleted": comment.get("deleted"),
+        "pending": comment.get("pending"),
+        "inline": comment.get("inline"),
+        "parent_id": parent.get("id"),
+        "resolution": comment.get("resolution"),
         "content": _truncate_text(content.get("raw") or content.get("markup"), 4000),
         "links": _bitbucket_links(comment),
+    }
+
+
+def _bitbucket_task_summary(task: dict) -> dict:
+    content = task.get("content") or {}
+    comment = task.get("comment") or {}
+    return {
+        "id": task.get("id"),
+        "state": task.get("state"),
+        "created_on": task.get("created_on"),
+        "updated_on": task.get("updated_on"),
+        "creator": _bitbucket_user(task.get("creator")),
+        "comment_id": comment.get("id"),
+        "content": _truncate_text(content.get("raw") or content.get("markup"), 4000),
+        "links": _bitbucket_links(task),
+    }
+
+
+def _normalize_diff_path(path: str | None) -> str | None:
+    if not path:
+        return path
+    if path.startswith("a/") or path.startswith("b/"):
+        return path[2:]
+    return path
+
+
+def _parse_diff_header_path(value: str) -> str:
+    value = value.strip()
+    if value == "/dev/null":
+        return value
+    if "\t" in value:
+        value = value.split("\t", 1)[0]
+    if " " in value:
+        value = value.split(" ", 1)[0]
+    return _normalize_diff_path(value) or value
+
+
+def _parse_hunk_header(line: str) -> tuple[int, int] | None:
+    match = re.match(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _parse_bitbucket_diff(diff: str) -> list[dict]:
+    files: list[dict] = []
+    current_file: dict | None = None
+    current_hunk: dict | None = None
+    old_line = 0
+    new_line = 0
+
+    for raw_line in diff.splitlines():
+        if raw_line.startswith("diff --git "):
+            current_file = {
+                "old_path": None,
+                "new_path": None,
+                "hunks": [],
+            }
+            files.append(current_file)
+            current_hunk = None
+            continue
+
+        if current_file is None:
+            continue
+
+        if raw_line.startswith("--- "):
+            current_file["old_path"] = _parse_diff_header_path(raw_line[4:])
+            continue
+
+        if raw_line.startswith("+++ "):
+            current_file["new_path"] = _parse_diff_header_path(raw_line[4:])
+            continue
+
+        hunk_lines = _parse_hunk_header(raw_line)
+        if hunk_lines:
+            old_line, new_line = hunk_lines
+            current_hunk = {
+                "header": raw_line,
+                "old_start": old_line,
+                "new_start": new_line,
+                "lines": [],
+            }
+            current_file["hunks"].append(current_hunk)
+            continue
+
+        if current_hunk is None:
+            continue
+
+        if raw_line.startswith("\\"):
+            current_hunk["lines"].append({
+                "kind": "metadata",
+                "old_line": None,
+                "new_line": None,
+                "text": raw_line,
+            })
+            continue
+
+        prefix = raw_line[:1]
+        text = raw_line[1:] if prefix in {" ", "+", "-"} else raw_line
+        if prefix == " ":
+            current_hunk["lines"].append({
+                "kind": "context",
+                "old_line": old_line,
+                "new_line": new_line,
+                "text": text,
+            })
+            old_line += 1
+            new_line += 1
+        elif prefix == "-":
+            current_hunk["lines"].append({
+                "kind": "removed",
+                "old_line": old_line,
+                "new_line": None,
+                "text": text,
+            })
+            old_line += 1
+        elif prefix == "+":
+            current_hunk["lines"].append({
+                "kind": "added",
+                "old_line": None,
+                "new_line": new_line,
+                "text": text,
+            })
+            new_line += 1
+        else:
+            current_hunk["lines"].append({
+                "kind": "unknown",
+                "old_line": None,
+                "new_line": None,
+                "text": raw_line,
+            })
+
+    return files
+
+
+def _bitbucket_diff_file_matches(file: dict, path: str) -> bool:
+    normalized = _normalize_diff_path(path)
+    return normalized in {
+        _normalize_diff_path(file.get("old_path")),
+        _normalize_diff_path(file.get("new_path")),
     }
 
 
@@ -1236,6 +1381,68 @@ def get_bitbucket_pull_request_diff(repo_slug: str, pull_request_id: int, worksp
 
 
 @mcp.tool()
+def get_bitbucket_pull_request_file_diff(repo_slug: str, pull_request_id: int, path: str, workspace: str = "", max_lines: int = 500) -> str:
+    """Fetch and parse the pull request diff hunks for one file, including old/new line numbers."""
+    if not path:
+        return json.dumps({"error": "Missing required field", "detail": "path is required"})
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/diff",
+        parse_json=False,
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+
+    files = _parse_bitbucket_diff(resp)
+    matches = [file for file in files if _bitbucket_diff_file_matches(file, path)]
+    if not matches:
+        return json.dumps({
+            "error": "File not found in diff",
+            "detail": f"No diff entry matched '{path}'",
+            "available_paths": [
+                {
+                    "old_path": file.get("old_path"),
+                    "new_path": file.get("new_path"),
+                }
+                for file in files
+            ],
+        }, indent=2)
+
+    file = matches[0]
+    total_lines = sum(len(hunk.get("lines", [])) for hunk in file.get("hunks", []))
+    remaining = max_lines
+    hunks = []
+    for hunk in file.get("hunks", []):
+        if remaining <= 0:
+            break
+        lines = hunk.get("lines", [])
+        hunks.append({
+            "header": hunk.get("header"),
+            "old_start": hunk.get("old_start"),
+            "new_start": hunk.get("new_start"),
+            "lines": lines[:remaining],
+        })
+        remaining -= len(lines[:remaining])
+
+    return json.dumps({
+        "repo": _bitbucket_repo_ref(repo_slug, workspace),
+        "pull_request_id": pull_request_id,
+        "old_path": file.get("old_path"),
+        "new_path": file.get("new_path"),
+        "hunks": hunks,
+        "truncated": total_lines > max_lines,
+        "line_selection": {
+            "use_side_to": "For added or unchanged new-file lines, call add_bitbucket_pull_request_inline_comment with side='to' and line=<new_line>.",
+            "use_side_from": "For removed old-file lines, call add_bitbucket_pull_request_inline_comment with side='from' and line=<old_line>.",
+        },
+    }, indent=2)
+
+
+@mcp.tool()
 def get_bitbucket_pull_request_diffstat(repo_slug: str, pull_request_id: int, workspace: str = "", max_results: int = 100) -> str:
     """Fetch Bitbucket Cloud pull request file-level diff statistics."""
     try:
@@ -1282,6 +1489,22 @@ def list_bitbucket_pull_request_comments(repo_slug: str, pull_request_id: int, w
         for comment in _bitbucket_values(resp, max_results)
     ]
     return json.dumps(comments, indent=2)
+
+
+@mcp.tool()
+def get_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, comment_id: int, workspace: str = "") -> str:
+    """Fetch one Bitbucket Cloud pull request comment, including inline metadata."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/comments/{comment_id}"
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    return json.dumps(_bitbucket_comment_summary(resp), indent=2)
 
 
 @mcp.tool()
@@ -1438,6 +1661,270 @@ def add_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, con
     if isinstance(resp, dict) and "error" in resp:
         return json.dumps(resp)
     return json.dumps(_bitbucket_comment_summary(resp), indent=2)
+
+
+@mcp.tool()
+def add_bitbucket_pull_request_inline_comment(repo_slug: str, pull_request_id: int, path: str, line: int, content: str, side: str = "to", workspace: str = "") -> str:
+    """Add a Bitbucket Cloud pull request comment on a specific diff line.
+
+    Use side='to' with a new-file line number for added or context lines.
+    Use side='from' with an old-file line number for removed lines.
+    """
+    if not path:
+        return json.dumps({"error": "Missing required field", "detail": "path is required"})
+    if not content:
+        return json.dumps({"error": "Missing required field", "detail": "content is required"})
+    if line < 1:
+        return json.dumps({"error": "Invalid line", "detail": "line must be a positive integer"})
+    if side not in {"from", "to"}:
+        return json.dumps({"error": "Invalid side", "detail": "side must be either 'from' or 'to'"})
+
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    inline = {
+        "path": _normalize_diff_path(path),
+        side: line,
+    }
+    payload = {
+        "content": {"raw": content},
+        "inline": inline,
+    }
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/comments",
+        method="POST",
+        data=payload,
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps({
+            **resp,
+            "attempted_inline": inline,
+            "hint": "Use get_bitbucket_pull_request_file_diff to choose a valid side/line from the parsed PR diff.",
+        }, indent=2)
+    return json.dumps(_bitbucket_comment_summary(resp), indent=2)
+
+
+@mcp.tool()
+def reply_to_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, comment_id: int, content: str, workspace: str = "") -> str:
+    """Reply to an existing Bitbucket Cloud pull request comment thread."""
+    if not content:
+        return json.dumps({"error": "Missing required field", "detail": "content is required"})
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    payload = {
+        "content": {"raw": content},
+        "parent": {"id": comment_id},
+    }
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/comments",
+        method="POST",
+        data=payload,
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    return json.dumps(_bitbucket_comment_summary(resp), indent=2)
+
+
+@mcp.tool()
+def update_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, comment_id: int, content: str, workspace: str = "") -> str:
+    """Update a Bitbucket Cloud pull request comment."""
+    if not content:
+        return json.dumps({"error": "Missing required field", "detail": "content is required"})
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/comments/{comment_id}",
+        method="PUT",
+        data={"content": {"raw": content}},
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    return json.dumps(_bitbucket_comment_summary(resp), indent=2)
+
+
+@mcp.tool()
+def delete_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, comment_id: int, workspace: str = "") -> str:
+    """Delete a Bitbucket Cloud pull request comment."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/comments/{comment_id}",
+        method="DELETE",
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    return json.dumps({
+        "deleted": True,
+        "repo": _bitbucket_repo_ref(repo_slug, workspace),
+        "pull_request_id": pull_request_id,
+        "comment_id": comment_id,
+    }, indent=2)
+
+
+@mcp.tool()
+def resolve_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, comment_id: int, workspace: str = "") -> str:
+    """Resolve a Bitbucket Cloud pull request comment thread."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/comments/{comment_id}/resolve",
+        method="POST",
+        data={},
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    return json.dumps({
+        "resolved": True,
+        "repo": _bitbucket_repo_ref(repo_slug, workspace),
+        "pull_request_id": pull_request_id,
+        "comment_id": comment_id,
+        "resolution": resp,
+    }, indent=2)
+
+
+@mcp.tool()
+def reopen_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, comment_id: int, workspace: str = "") -> str:
+    """Reopen a resolved Bitbucket Cloud pull request comment thread."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/comments/{comment_id}/resolve",
+        method="DELETE",
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    return json.dumps({
+        "resolved": False,
+        "repo": _bitbucket_repo_ref(repo_slug, workspace),
+        "pull_request_id": pull_request_id,
+        "comment_id": comment_id,
+    }, indent=2)
+
+
+@mcp.tool()
+def create_bitbucket_pull_request_task(repo_slug: str, pull_request_id: int, content: str, workspace: str = "", comment_id: int = 0) -> str:
+    """Create a Bitbucket Cloud pull request task, optionally attached to a comment."""
+    if not content:
+        return json.dumps({"error": "Missing required field", "detail": "content is required"})
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    payload = {"content": {"raw": content}}
+    if comment_id:
+        payload["comment"] = {"id": comment_id}
+
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/tasks",
+        method="POST",
+        data=payload,
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    return json.dumps(_bitbucket_task_summary(resp), indent=2)
+
+
+@mcp.tool()
+def list_bitbucket_pull_request_tasks(repo_slug: str, pull_request_id: int, workspace: str = "", max_results: int = 50) -> str:
+    """List Bitbucket Cloud pull request tasks."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/"
+        f"{pull_request_id}/tasks?{urlencode({'pagelen': min(max_results, 100)})}"
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    tasks = [_bitbucket_task_summary(task) for task in _bitbucket_values(resp, max_results)]
+    return json.dumps(tasks, indent=2)
+
+
+@mcp.tool()
+def get_bitbucket_pull_request_task(repo_slug: str, pull_request_id: int, task_id: int, workspace: str = "") -> str:
+    """Fetch one Bitbucket Cloud pull request task."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/tasks/{task_id}"
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    return json.dumps(_bitbucket_task_summary(resp), indent=2)
+
+
+@mcp.tool()
+def update_bitbucket_pull_request_task(repo_slug: str, pull_request_id: int, task_id: int, workspace: str = "", content: str = "", state: str = "") -> str:
+    """Update a Bitbucket Cloud pull request task's content and/or state."""
+    if not content and not state:
+        return json.dumps({"error": "Missing required field", "detail": "content or state is required"})
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    payload = {}
+    if content:
+        payload["content"] = {"raw": content}
+    if state:
+        normalized_state = state.upper()
+        if normalized_state not in {"UNRESOLVED", "RESOLVED"}:
+            return json.dumps({"error": "Invalid state", "detail": "state must be UNRESOLVED or RESOLVED"})
+        payload["state"] = normalized_state
+
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/tasks/{task_id}",
+        method="PUT",
+        data=payload,
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    return json.dumps(_bitbucket_task_summary(resp), indent=2)
+
+
+@mcp.tool()
+def delete_bitbucket_pull_request_task(repo_slug: str, pull_request_id: int, task_id: int, workspace: str = "") -> str:
+    """Delete a Bitbucket Cloud pull request task."""
+    try:
+        workspace = _bitbucket_workspace(workspace)
+    except ValueError as e:
+        return json.dumps({"error": "Missing workspace", "detail": str(e)})
+
+    resp = _bitbucket_api(
+        f"{_bitbucket_repo_path(workspace, repo_slug)}/pullrequests/{pull_request_id}/tasks/{task_id}",
+        method="DELETE",
+    )
+    if isinstance(resp, dict) and "error" in resp:
+        return json.dumps(resp)
+    return json.dumps({
+        "deleted": True,
+        "repo": _bitbucket_repo_ref(repo_slug, workspace),
+        "pull_request_id": pull_request_id,
+        "task_id": task_id,
+    }, indent=2)
 
 
 @mcp.tool()
