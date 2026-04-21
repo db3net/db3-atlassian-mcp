@@ -2064,8 +2064,9 @@ def attach_file(issue_key: str, file_path: str) -> str:
 
 
 @mcp.tool()
-def link_tickets(inward_issue: str, outward_issue: str, link_type: str = "Relates") -> str:
-    """Link two Jira tickets together. Default relationship is 'Relates'. Common types: 'Relates', 'Blocks', 'Cloners', 'Duplicate'."""
+def link_tickets(inward_issue: str, outward_issue: str, link_type: str = "relates to") -> str:
+    """Link two Jira tickets together. Default relationship is 'relates to'. Common types: 'relates to', 'Blocks', 'Duplicate', 'Cloners'."""
+    # First try the requested link type; if it fails with 404, list available types
     payload = {
         "type": {"name": link_type},
         "inwardIssue": {"key": inward_issue},
@@ -2073,6 +2074,12 @@ def link_tickets(inward_issue: str, outward_issue: str, link_type: str = "Relate
     }
     resp = _api("/issueLink", method="POST", data=payload)
     if resp and "error" in resp:
+        # If link type not found, fetch available types and include them in the error
+        if "No issue link type" in resp.get("detail", ""):
+            types_resp = _api("/issueLinkType")
+            if not (types_resp and "error" in types_resp):
+                available = [t.get("name") for t in types_resp.get("issueLinkTypes", [])]
+                resp["detail"] = f"Link type '{link_type}' not found. Available: {', '.join(available)}"
         return json.dumps(resp)
     return json.dumps({
         "status": "linked",
