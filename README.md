@@ -131,12 +131,26 @@ Once connected, ask Kiro something like "Read Jira ticket PROJECT-123" to verify
 
 ## Configuration
 
+### Credentials
+
 The server reads credentials from a `.env` file. It searches in this order:
 
 1. `~/.db3-atlassian-mcp/.env` (recommended)
 2. `.env` in the current working directory
 
-You can also pass credentials via your MCP config's `env` block:
+You can also pass credentials via your MCP config's `env` block (see Step 3 above).
+
+### Bitbucket Tool Tiers
+
+By default, only core Bitbucket tools are enabled (repos, branches, PRs) to keep the tool count low. Enable additional tiers via environment variables:
+
+| Variable | Default | Tools Added |
+|---|---|---|
+| *(core — always on)* | — | `list_bitbucket_repos`, `get_bitbucket_repo`, `search_bitbucket_repos`, `list_bitbucket_branches`, `list_bitbucket_pull_requests`, `get_bitbucket_pull_request` |
+| `ENABLE_BITBUCKET_PR_TOOLS` | `false` | Commits, diffs, diffstats, PR comments, inline comments, replies, activity, status, create PR (+15 tools) |
+| `ENABLE_BITBUCKET_ADMIN_TOOLS` | `false` | Build statuses, pipelines, resolve/reopen comments, PR tasks (+10 tools) |
+
+Example with all tiers enabled:
 
 ```json
 "db3.atlassian-mcp": {
@@ -145,12 +159,12 @@ You can also pass credentials via your MCP config's `env` block:
   "env": {
     "JIRA_BASE_URL": "https://yourcompany.atlassian.net",
     "JIRA_USER": "you@yourcompany.com",
-    "JIRA_API_KEY": "your-api-token-here"
+    "JIRA_API_KEY": "your-api-token-here",
+    "ENABLE_BITBUCKET_PR_TOOLS": "true",
+    "ENABLE_BITBUCKET_ADMIN_TOOLS": "true"
   }
 }
 ```
-
-Either approach works. The `.env` file keeps credentials out of your IDE config.
 
 ### Bitbucket Cloud
 

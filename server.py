@@ -1129,6 +1129,25 @@ def get_child_issues(issue_key: str) -> str:
     return search_tickets(jql, max_results=50)
 
 
+# ── Bitbucket tool tiers ────────────────────────────────────────────
+# Core Bitbucket tools are always registered.
+# PR workflow and admin tools are opt-in via environment variables.
+_ENABLE_BB_PR = os.environ.get("ENABLE_BITBUCKET_PR_TOOLS", "false").lower() != "false"
+_ENABLE_BB_ADMIN = os.environ.get("ENABLE_BITBUCKET_ADMIN_TOOLS", "false").lower() != "false"
+
+
+def _bb_pr_tool():
+    """Decorator: registers tool only if ENABLE_BITBUCKET_PR_TOOLS is true."""
+    return mcp.tool() if _ENABLE_BB_PR else lambda fn: fn
+
+
+def _bb_admin_tool():
+    """Decorator: registers tool only if ENABLE_BITBUCKET_ADMIN_TOOLS is true."""
+    return mcp.tool() if _ENABLE_BB_ADMIN else lambda fn: fn
+
+
+# ── Core Bitbucket tools (always on) ────────────────────────────────
+
 @mcp.tool()
 def list_bitbucket_repos(workspace: str = "", max_results: int = 25, role: str = "") -> str:
     """List Bitbucket Cloud repositories in a workspace."""
@@ -1224,7 +1243,9 @@ def list_bitbucket_branches(repo_slug: str, workspace: str = "", query: str = ""
     return json.dumps(branches, indent=2)
 
 
-@mcp.tool()
+# ── Bitbucket PR workflow tools (opt-in) ──────────────────────────
+
+@_bb_pr_tool()
 def list_bitbucket_commits(repo_slug: str, workspace: str = "", branch: str = "", max_results: int = 25) -> str:
     """List Bitbucket Cloud commits for a repository or branch."""
     try:
@@ -1242,7 +1263,7 @@ def list_bitbucket_commits(repo_slug: str, workspace: str = "", branch: str = ""
     return json.dumps(commits, indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def get_bitbucket_commit(repo_slug: str, commit: str, workspace: str = "") -> str:
     """Fetch a Bitbucket Cloud commit by hash or ref."""
     try:
@@ -1256,7 +1277,9 @@ def get_bitbucket_commit(repo_slug: str, commit: str, workspace: str = "") -> st
     return json.dumps(_bitbucket_commit_summary(resp), indent=2)
 
 
-@mcp.tool()
+# ── Bitbucket admin tools (opt-in) ───────────────────────────────
+
+@_bb_admin_tool()
 def list_bitbucket_commit_statuses(repo_slug: str, commit: str, workspace: str = "", max_results: int = 25) -> str:
     """List Bitbucket Cloud build statuses attached to a commit."""
     try:
@@ -1275,7 +1298,7 @@ def list_bitbucket_commit_statuses(repo_slug: str, commit: str, workspace: str =
     return json.dumps(statuses, indent=2)
 
 
-@mcp.tool()
+@_bb_admin_tool()
 def list_bitbucket_pull_request_statuses(repo_slug: str, pull_request_id: int, workspace: str = "", max_results: int = 25) -> str:
     """List Bitbucket Cloud build statuses attached to a pull request."""
     try:
@@ -1294,7 +1317,7 @@ def list_bitbucket_pull_request_statuses(repo_slug: str, pull_request_id: int, w
     return json.dumps(statuses, indent=2)
 
 
-@mcp.tool()
+@_bb_admin_tool()
 def list_bitbucket_pipelines(repo_slug: str, workspace: str = "", branch: str = "", max_results: int = 10) -> str:
     """List recent Bitbucket Pipelines runs for a repository, optionally filtered by branch."""
     try:
@@ -1357,7 +1380,7 @@ def get_bitbucket_pull_request(repo_slug: str, pull_request_id: int, workspace: 
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def get_bitbucket_pull_request_diff(repo_slug: str, pull_request_id: int, workspace: str = "", max_chars: int = 20000) -> str:
     """Fetch a Bitbucket Cloud pull request diff, truncated to max_chars."""
     try:
@@ -1380,7 +1403,7 @@ def get_bitbucket_pull_request_diff(repo_slug: str, pull_request_id: int, worksp
     }, indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def get_bitbucket_pull_request_file_diff(repo_slug: str, pull_request_id: int, path: str, workspace: str = "", max_lines: int = 500) -> str:
     """Fetch and parse the pull request diff hunks for one file, including old/new line numbers."""
     if not path:
@@ -1442,7 +1465,7 @@ def get_bitbucket_pull_request_file_diff(repo_slug: str, pull_request_id: int, p
     }, indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def get_bitbucket_pull_request_diffstat(repo_slug: str, pull_request_id: int, workspace: str = "", max_results: int = 100) -> str:
     """Fetch Bitbucket Cloud pull request file-level diff statistics."""
     try:
@@ -1469,7 +1492,7 @@ def get_bitbucket_pull_request_diffstat(repo_slug: str, pull_request_id: int, wo
     }, indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def list_bitbucket_pull_request_comments(repo_slug: str, pull_request_id: int, workspace: str = "", max_results: int = 50) -> str:
     """List Bitbucket Cloud pull request comments."""
     try:
@@ -1491,7 +1514,7 @@ def list_bitbucket_pull_request_comments(repo_slug: str, pull_request_id: int, w
     return json.dumps(comments, indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def get_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, comment_id: int, workspace: str = "") -> str:
     """Fetch one Bitbucket Cloud pull request comment, including inline metadata."""
     try:
@@ -1507,7 +1530,7 @@ def get_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, com
     return json.dumps(_bitbucket_comment_summary(resp), indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def list_bitbucket_pull_request_activity(repo_slug: str, pull_request_id: int, workspace: str = "", max_results: int = 50) -> str:
     """List Bitbucket Cloud pull request activity events."""
     try:
@@ -1544,7 +1567,7 @@ def list_bitbucket_pull_request_activity(repo_slug: str, pull_request_id: int, w
     return json.dumps(activities, indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def get_bitbucket_pull_request_status(repo_slug: str, pull_request_id: int, workspace: str = "", max_files: int = 25) -> str:
     """Fetch a compact pull request status summary with reviewers, builds, and changed files."""
     try:
@@ -1620,7 +1643,7 @@ def get_bitbucket_pull_request_status(repo_slug: str, pull_request_id: int, work
     }, indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def create_bitbucket_pull_request(repo_slug: str, title: str, source_branch: str, destination_branch: str = "main", workspace: str = "", description: str = "", close_source_branch: bool = False) -> str:
     """Create a Bitbucket Cloud pull request."""
     try:
@@ -1645,7 +1668,7 @@ def create_bitbucket_pull_request(repo_slug: str, title: str, source_branch: str
     return json.dumps(_bitbucket_pr_summary(resp), indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def add_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, content: str, workspace: str = "") -> str:
     """Add a plain text comment to a Bitbucket Cloud pull request."""
     try:
@@ -1663,7 +1686,7 @@ def add_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, con
     return json.dumps(_bitbucket_comment_summary(resp), indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def add_bitbucket_pull_request_inline_comment(repo_slug: str, pull_request_id: int, path: str, line: int, content: str, side: str = "to", workspace: str = "") -> str:
     """Add a Bitbucket Cloud pull request comment on a specific diff line.
 
@@ -1706,7 +1729,7 @@ def add_bitbucket_pull_request_inline_comment(repo_slug: str, pull_request_id: i
     return json.dumps(_bitbucket_comment_summary(resp), indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def reply_to_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, comment_id: int, content: str, workspace: str = "") -> str:
     """Reply to an existing Bitbucket Cloud pull request comment thread."""
     if not content:
@@ -1730,7 +1753,7 @@ def reply_to_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int
     return json.dumps(_bitbucket_comment_summary(resp), indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def update_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, comment_id: int, content: str, workspace: str = "") -> str:
     """Update a Bitbucket Cloud pull request comment."""
     if not content:
@@ -1750,7 +1773,7 @@ def update_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, 
     return json.dumps(_bitbucket_comment_summary(resp), indent=2)
 
 
-@mcp.tool()
+@_bb_pr_tool()
 def delete_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, comment_id: int, workspace: str = "") -> str:
     """Delete a Bitbucket Cloud pull request comment."""
     try:
@@ -1772,7 +1795,7 @@ def delete_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, 
     }, indent=2)
 
 
-@mcp.tool()
+@_bb_admin_tool()
 def resolve_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, comment_id: int, workspace: str = "") -> str:
     """Resolve a Bitbucket Cloud pull request comment thread."""
     try:
@@ -1796,7 +1819,7 @@ def resolve_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int,
     }, indent=2)
 
 
-@mcp.tool()
+@_bb_admin_tool()
 def reopen_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, comment_id: int, workspace: str = "") -> str:
     """Reopen a resolved Bitbucket Cloud pull request comment thread."""
     try:
@@ -1818,7 +1841,7 @@ def reopen_bitbucket_pull_request_comment(repo_slug: str, pull_request_id: int, 
     }, indent=2)
 
 
-@mcp.tool()
+@_bb_admin_tool()
 def create_bitbucket_pull_request_task(repo_slug: str, pull_request_id: int, content: str, workspace: str = "", comment_id: int = 0) -> str:
     """Create a Bitbucket Cloud pull request task, optionally attached to a comment."""
     if not content:
@@ -1842,7 +1865,7 @@ def create_bitbucket_pull_request_task(repo_slug: str, pull_request_id: int, con
     return json.dumps(_bitbucket_task_summary(resp), indent=2)
 
 
-@mcp.tool()
+@_bb_admin_tool()
 def list_bitbucket_pull_request_tasks(repo_slug: str, pull_request_id: int, workspace: str = "", max_results: int = 50) -> str:
     """List Bitbucket Cloud pull request tasks."""
     try:
@@ -1860,7 +1883,7 @@ def list_bitbucket_pull_request_tasks(repo_slug: str, pull_request_id: int, work
     return json.dumps(tasks, indent=2)
 
 
-@mcp.tool()
+@_bb_admin_tool()
 def get_bitbucket_pull_request_task(repo_slug: str, pull_request_id: int, task_id: int, workspace: str = "") -> str:
     """Fetch one Bitbucket Cloud pull request task."""
     try:
@@ -1876,7 +1899,7 @@ def get_bitbucket_pull_request_task(repo_slug: str, pull_request_id: int, task_i
     return json.dumps(_bitbucket_task_summary(resp), indent=2)
 
 
-@mcp.tool()
+@_bb_admin_tool()
 def update_bitbucket_pull_request_task(repo_slug: str, pull_request_id: int, task_id: int, workspace: str = "", content: str = "", state: str = "") -> str:
     """Update a Bitbucket Cloud pull request task's content and/or state."""
     if not content and not state:
@@ -1905,7 +1928,7 @@ def update_bitbucket_pull_request_task(repo_slug: str, pull_request_id: int, tas
     return json.dumps(_bitbucket_task_summary(resp), indent=2)
 
 
-@mcp.tool()
+@_bb_admin_tool()
 def delete_bitbucket_pull_request_task(repo_slug: str, pull_request_id: int, task_id: int, workspace: str = "") -> str:
     """Delete a Bitbucket Cloud pull request task."""
     try:
