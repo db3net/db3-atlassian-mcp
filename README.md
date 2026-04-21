@@ -1,6 +1,6 @@
 # db3-atlassian-mcp
 
-Lightweight MCP server for Jira and Confluence — read, create, and update from your AI IDE.
+Lightweight MCP server for Jira, Confluence, and Bitbucket — read, create, and update from your AI IDE.
 
 ## Install
 
@@ -195,10 +195,10 @@ BITBUCKET_API_TOKEN=your-bitbucket-api-token
 ```
 
 `BITBUCKET_WORKSPACE` lets tool calls omit the workspace argument. For
-`bitbucket.org/merchante-solutions/...`, use:
+`bitbucket.org/your-workspace/...`, use:
 
 ```bash
-BITBUCKET_WORKSPACE=merchante-solutions
+BITBUCKET_WORKSPACE=your-workspace
 ```
 
 Use a Bitbucket Cloud API token scoped to the operations you need. Read-only

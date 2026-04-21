@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "db3-atlassian-mcp"
-version = "1.4.0"
-description = "Atlassian MCP Server — Jira and Confluence tools for AI IDEs"
+version = "1.4.1"
+description = "Atlassian MCP Server — Jira, Confluence, and Bitbucket tools for AI IDEs"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
-    { name = "David Black", email = "dblack@merchante.com" },
+    { name = "David Black", email = "db3@db3.net" },
 ]
 keywords = ["mcp", "atlassian", "jira", "confluence", "kiro", "ai", "ide"]
 classifiers = [
