@@ -22,6 +22,10 @@ JIRA_API_KEY=your-api-token-here
 BITBUCKET_WORKSPACE=your-workspace
 BITBUCKET_USER=you@yourcompany.com
 BITBUCKET_API_TOKEN=your-bitbucket-api-token
+
+# Optional: Enable additional Bitbucket tool tiers
+# ENABLE_BITBUCKET_PR_TOOLS=true
+# ENABLE_BITBUCKET_ADMIN_TOOLS=true
 EOF
 ```
 
@@ -115,9 +119,23 @@ Once connected, ask Kiro something like "Read Jira ticket PROJECT-123" to verify
 - Create new pages (with optional parent page)
 - Update existing pages with rich formatting
 
-### Bitbucket Cloud
-- List repositories in a workspace
-- Search repositories by slug, name, or description
+### Bitbucket Cloud (core — always on)
+- List and search repositories in a workspace
+- List branches for a repository
+- List and view pull requests
+
+### Bitbucket Cloud (opt-in via `ENABLE_BITBUCKET_PR_TOOLS`)
+- List and view commits
+- View PR diffs, file diffs, and diffstats
+- Create pull requests
+- Add, reply to, update, and delete PR comments
+- Add inline comments on specific diff lines
+
+### Bitbucket Cloud (opt-in via `ENABLE_BITBUCKET_ADMIN_TOOLS`)
+- View build statuses on commits and PRs
+- List pipeline runs
+- Resolve and reopen PR comment threads
+- Create, update, and delete PR tasks
 - Fetch repository metadata
 - List branches and commits
 - Fetch commit details and build statuses
