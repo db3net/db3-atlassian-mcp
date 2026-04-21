@@ -2064,6 +2064,25 @@ def attach_file(issue_key: str, file_path: str) -> str:
 
 
 @mcp.tool()
+def link_tickets(inward_issue: str, outward_issue: str, link_type: str = "Relates") -> str:
+    """Link two Jira tickets together. Default relationship is 'Relates'. Common types: 'Relates', 'Blocks', 'Cloners', 'Duplicate'."""
+    payload = {
+        "type": {"name": link_type},
+        "inwardIssue": {"key": inward_issue},
+        "outwardIssue": {"key": outward_issue},
+    }
+    resp = _api("/issueLink", method="POST", data=payload)
+    if resp and "error" in resp:
+        return json.dumps(resp)
+    return json.dumps({
+        "status": "linked",
+        "inward": inward_issue,
+        "outward": outward_issue,
+        "type": link_type,
+    })
+
+
+@mcp.tool()
 def get_confluence_page(page_id: str) -> str:
     """Fetch a Confluence page by numeric ID or full URL. Returns title, space, version, and body as plain text."""
     try:
