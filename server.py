@@ -2276,5 +2276,44 @@ def update_confluence_page(page_id: str, title: str, body: str) -> str:
     return json.dumps(result, indent=2)
 
 
+@mcp.tool()
+def move_confluence_page(page_id: str, target_parent_id: str) -> str:
+    """Move a Confluence page under a new parent page. Provide the page ID and the target parent page ID."""
+    # Fetch current page to get title, version, and body
+    resp = _confluence_api(f"/pages/{page_id}?body-format=storage")
+    if "error" in resp:
+        return json.dumps(resp)
+
+    current_version = resp.get("version", {}).get("number", 0)
+    title = resp.get("title", "")
+    body_value = resp.get("body", {}).get("storage", {}).get("value", "")
+
+    payload = {
+        "id": page_id,
+        "title": title,
+        "status": "current",
+        "parentId": target_parent_id,
+        "body": {
+            "representation": "storage",
+            "value": body_value,
+        },
+        "version": {
+            "number": current_version + 1,
+        },
+    }
+
+    update_resp = _confluence_api(f"/pages/{page_id}", method="PUT", data=payload)
+    if "error" in update_resp:
+        return json.dumps(update_resp)
+
+    result = {
+        "id": update_resp.get("id"),
+        "title": update_resp.get("title"),
+        "parent_id": target_parent_id,
+        "version": update_resp.get("version", {}).get("number"),
+    }
+    return json.dumps(result, indent=2)
+
+
 if __name__ == "__main__":
     mcp.run()
