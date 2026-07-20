@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "db3-atlassian-mcp"
-version = "1.4.1"
+version = "1.4.2"
 description = "Atlassian MCP Server — Jira, Confluence, and Bitbucket tools for AI IDEs"
 readme = "README.md"
 license = {text = "MIT"}
